@@ -265,6 +265,7 @@ function mapDataLogger(rawData) {
   data.overviewPath = "";
   data.platePath = "";
   data.licensePlate = "";
+  data.province = "";
   data.cropPath = "";
   data.stamp = new Date(parseInt(rawData.StartTime));
   data.violation = 0;

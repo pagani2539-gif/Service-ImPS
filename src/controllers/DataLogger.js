@@ -95,6 +95,7 @@ class DataLogger extends WSController {
           mappedData.platePath = ocrResult.plate_path;
           mappedData.licensePlate = ocrResult.license_plate;
           mappedData.cropPath = ocrResult.crop_path;
+          mappedData.province = ocrResult.province;
         }
       }
   
