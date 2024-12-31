@@ -31,7 +31,7 @@ function classifyVehicle(data, config) {
   let classifiedVehicle = { ...data };
 
   if (data.gvw === -1) {
-    classifiedVehicle.vehicleClassID = 19;
+    classifiedVehicle.vehicleClassID = 0;
   } else if (data.axles.length === 2) {
     if (data.axles[1].wheelbase < config.distance_of_axles_between_class_2) {
       classifiedVehicle.vehicleClassID = 1;
@@ -86,15 +86,12 @@ function classifyVehicle(data, config) {
       data.axles[5].groupID == data.axles[6].groupID
     ) {
       classifiedVehicle.vehicleClassID = 13;
-      // data.ucid_new.push(car_class_aj[13]);
     } else {
       classifiedVehicle.vehicleClassID = 18;
-      // data.ucid_new.push(car_class_aj[18]);
     }
   } else {
-    //ไม่สามารถตรวจสอบได้
+    //ประเภทอื่นๆ
     classifiedVehicle.vehicleClassID = 19;
-    // data.ucid_new.push(car_class_aj[19]);
   }
   // Add more classification rules here as needed...
 
@@ -277,6 +274,61 @@ function mapDataLogger(rawData) {
   return data;
 }
 
+/**
+ * Check if the vehicle is a bus based on the license plate.
+ * @param {String} licensePlate - The license plate of the vehicle.
+ * @returns {Boolean} - Returns true if the vehicle is identified as a bus, false otherwise.
+ */
+function isBus(licensePlate) {
+  if (!licensePlate || typeof licensePlate !== "string") return false;
+
+  // Split the license plate into characters
+  const licensePlateArr = licensePlate.split("");
+
+  // Check if it meets the bus criteria
+  if (
+    licensePlateArr.length > 1 &&
+    (
+      ["1", "2", "3", "4"].includes(licensePlateArr[0]) || // Starts with specific numbers
+      isNaN(parseInt(licensePlateArr[0])) || // First character is not a number
+      isNaN(parseInt(licensePlateArr[1])) // Second character is not a number
+    )
+  ) {
+    return true; // It's a bus
+  }
+
+  return false; // Not a bus
+}
+
+
+/**
+ * Check if the GVW should be ignored based on predefined conditions.
+ * @param {Object} data - The mapped data object containing GVW and other details.
+ * @returns {Boolean} - Returns true if GVW should be ignored, false otherwise.
+ */
+function ignoreGVW(data) {
+  if (!data || typeof data.gvw === "undefined") return true; // Ignore if no GVW data
+
+  // Example conditions for ignoring GVW
+  if (data.gvw < this.config.gvw_ignored) {
+    return true;
+  }
+  return false; // GVW is valid
+}
+
+/**
+ * Check if the license plate contains non-numeric characters.
+ * @param {String} licensePlate - The license plate of the vehicle.
+ * @returns {Boolean} - Returns true if the license plate contains non-numeric characters, false otherwise.
+ */
+function hasNonNumericCharacters(licensePlate) {
+  if (!licensePlate || typeof licensePlate !== "string") return false; // Handle null or invalid input
+
+  // Check if the license plate contains any non-numeric character
+  return /\D/.test(licensePlate); // \D matches any non-digit character
+}
+
+
 module.exports = {
   mapDataLogger,
   classifyVehicle,
@@ -285,4 +337,7 @@ module.exports = {
   mapWarningFlag,
   mapErrorFlag,
   setSingleTire,
+  isBus,
+  ignoreGVW,
+  hasNonNumericCharacters
 };

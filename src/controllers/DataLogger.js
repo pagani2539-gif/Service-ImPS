@@ -8,6 +8,9 @@ const {
   mapWarningFlag,
   mapErrorFlag,
   setSingleTire,
+  isBus,
+  ignoreGVW,
+  hasNonNumericCharacters,
 } = require("../utils/mappers/mapDataLogger");
 const SnapshotManager = require("../utils/snapshotManager");
 const dayjs = require("dayjs");
@@ -54,13 +57,15 @@ class DataLogger extends WSController {
     try {
       const rawData = JSON.parse(message);
       let mappedData = mapDataLogger(rawData);
+      if (ignoreGVW(mappedData)) return;
+
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
       mappedData = setViolation(mappedData, this.vehicleClasses);
       mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
-  
+
       // const lprSnapshots = await this.lprSnapshotManager.findSnapshots(mappedData, "lpr");
       // const overviewSnapshots = await this.overviewSnapshotManager.findSnapshots(mappedData, "overview");
 
@@ -69,10 +74,13 @@ class DataLogger extends WSController {
         this.lprSnapshotManager.findSnapshots(mappedData, "lpr"),
         this.overviewSnapshotManager.findSnapshots(mappedData, "overview"),
       ]);
-  
+
       if (lprSnapshots) {
-        const ocrResult = await ocrService.sendToOCR(lprSnapshots, this.config.ocr_url);
-  
+        const ocrResult = await ocrService.sendToOCR(
+          lprSnapshots,
+          this.config.ocr_url
+        );
+
         if (ocrResult) {
           // Use Promise.all for concurrent image uploads
           const [plateUploadResult, cropUploadResult] = await Promise.all([
@@ -80,17 +88,20 @@ class DataLogger extends WSController {
               ? this.lprSnapshotManager.uploadImage(ocrResult.plate_path, "lpr")
               : Promise.resolve({ success: false }),
             ocrResult.crop_path
-              ? this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
+              ? this.cropSnapshotManager.uploadImage(
+                  ocrResult.crop_path,
+                  "crop"
+                )
               : Promise.resolve({ success: false }),
           ]);
-  
+
           if (plateUploadResult.success) {
             ocrResult.plate_path = plateUploadResult.data.fileUrl; // Update with uploaded file path
           }
           if (cropUploadResult.success) {
             ocrResult.crop_path = cropUploadResult.data.fileUrl; // Update with uploaded file path
           }
-  
+
           // Update mappedData with the modified ocrResult
           mappedData.platePath = ocrResult.plate_path;
           mappedData.licensePlate = ocrResult.license_plate;
@@ -98,32 +109,38 @@ class DataLogger extends WSController {
           mappedData.province = ocrResult.province;
         }
       }
-  
+
       if (overviewSnapshots) {
-        const overviewUploadResult = await this.overviewSnapshotManager.uploadImage(
-          overviewSnapshots.imageUrl,
-          "overview"
-        );
+        const overviewUploadResult =
+          await this.overviewSnapshotManager.uploadImage(
+            overviewSnapshots.imageUrl,
+            "overview"
+          );
         if (overviewUploadResult.success) {
           mappedData.overviewPath = overviewUploadResult.data.fileUrl; // Update with uploaded file path
         }
       } else {
         console.warn("No Overview snapshots found.");
       }
-  
-      // console.log('----------------',mappedData.platesPath,mappedData.overviewPath)
+
       // Proceed to save the data only after all uploads are confirmed
+      // Check if the vehicle is a bus
+      if (isBus(mappedData.licensePlate)) {
+        return; // Exit early if it's a bus
+      }
+      if(hasNonNumericCharacters(mappedData.licensePlate)){
+        return;
+      }
+
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
-  
+
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
     } catch (err) {
       console.error("DataLogger error handling data message:", err);
     }
   }
-  
-  
 
   async handleTriggerMessage(message) {
     try {
