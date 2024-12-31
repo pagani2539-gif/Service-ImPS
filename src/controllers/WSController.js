@@ -2,7 +2,7 @@ const WebSocket = require("ws");
 const { takeSnapshot } = require("../utils/snapshot");
 
 class WSController {
-  constructor(dataWsUrl, triggerWsUrl, reconnectInterval = 60000) {
+  constructor(dataWsUrl, triggerWsUrl, reconnectInterval = 30000) {
     this.dataWsUrl = dataWsUrl;
     this.triggerWsUrl = triggerWsUrl;
     this.reconnectInterval = reconnectInterval;

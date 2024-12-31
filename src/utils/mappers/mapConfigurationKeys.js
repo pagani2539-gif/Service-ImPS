@@ -1,0 +1,38 @@
+// src/utils/mapConfigurationKeys.js
+
+/**
+ * Maps configuration keys to default values if they are null or undefined.
+ * @param {Object} config - Configuration object from the database.
+ * @returns {Object} - Mapped configuration object with default values.
+ */
+function mapConfigurationKeys(config) {
+    return {
+      station_id: config.station_id || 0,
+      station_name: config.station_name || "Unknown Station",
+      station_ip: config.station_ip || "0.0.0.0",
+      controller_id: config.controller_id || 0,
+      controller_data_url: config.controller_data_url || "http://default-data-url",
+      controller_sensor_url: config.controller_sensor_url || "http://default-sensor-url",
+      wheel_base_group_length: config.wheel_base_group_length || 0.0,
+      flir_data_url: config.flir_data_url || "http://default-flir-url",
+      flux_ip: config.flux_ip || "0.0.0.0",
+      flux_video_chanel: config.flux_video_chanel || 0,
+      gvw_ignored: config.gvw_ignored || 0,
+      vehicle_length_ignored: config.vehicle_length_ignored || 0,
+      minimum_search: config.minimum_search || 1000,
+      maximum_search: config.maximum_search || 5000,
+      ocr_url: config.ocr_url || "http://default-ocr-url",
+      central_server_url: config.central_server_url || "http://default-central-server-url",
+      center_station_url: config.center_station_url || "http://default-center-station-url",
+      delay_capture_overview: config.delay_capture_overview || 1000,
+      distance_of_axles_between_class_2: config.distance_of_axles_between_class_2 || 0,
+      floor_type: config.floor_type || "Concrete",
+      thick: config.thick || 0,
+      streaming_url: config.streaming_url || JSON.stringify([]),
+      capture_overview: config.capture_overview || JSON.stringify([]),
+      capture_lpr: config.capture_lpr || JSON.stringify([]),
+    };
+  }
+  
+  module.exports = mapConfigurationKeys;
+  

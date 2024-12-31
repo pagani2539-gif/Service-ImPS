@@ -4,7 +4,7 @@ const pool = require("../config/db");
  * Fetch all configurations from the database.
  * @returns {Promise<Array>} - Array of all configuration data.
  */
-async function getAllConfigurations() {
+async function getConfiguration() {
   try {
     const [rows] = await pool.query(
       `SELECT 
@@ -16,11 +16,13 @@ async function getAllConfigurations() {
       throw new Error(`No configurations found in the database.`);
     }
 
-    return rows;
+    // Return the first configuration
+    return rows[0];
   } catch (err) {
-    console.error("Error fetching configurations:", err);
+    console.error("Error fetching configuration:", err);
     throw err;
   }
 }
 
-module.exports = { getAllConfigurations };
+
+module.exports = { getConfiguration };
