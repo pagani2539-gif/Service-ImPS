@@ -5,9 +5,9 @@ const dayjs = require("dayjs");
 const FormData = require("form-data"); // Import form-data
 
 class SnapshotManager {
-  constructor(pool, config, uploadUrl, baseImagePath ) {
+  constructor(pool, config, uploadUrl, baseImagePath) {
     this.pool = pool; // Use the shared database pool
-    this.baseImagePath = baseImagePath;// Base path to save images
+    this.baseImagePath = baseImagePath; // Base path to save images
     this.config = config; // Configuration
     this.uploadUrl = uploadUrl; // Upload URL (passed or from environment variable)
   }
@@ -21,7 +21,10 @@ class SnapshotManager {
     const { lane, type, stamp } = metadata;
 
     try {
-      const response = await axios.get(url, { responseType: "arraybuffer", timeout: 3000, });
+      const response = await axios.get(url, {
+        responseType: "arraybuffer",
+        timeout: 3000,
+      });
       if (response.status === 200) {
         // Extract year, month, and day from the timestamp
         const date = dayjs(stamp);
@@ -50,7 +53,7 @@ class SnapshotManager {
         await fs.writeFile(filePath, response.data);
 
         // Construct the image URL with year/month/day structure
-        const imageUrl = filePath
+        const imageUrl = filePath;
 
         // Save snapshot to the database
         await this.pool.execute(
@@ -63,9 +66,7 @@ class SnapshotManager {
         throw new Error(`Failed to fetch snapshot: ${response.status}`);
       }
     } catch (err) {
-      console.error(
-        `Error taking snapshot for lane ${lane}, type ${type}:`
-      );
+      console.error(`Error taking snapshot for lane ${lane}, type ${type}:`);
     }
   }
 
@@ -77,6 +78,11 @@ class SnapshotManager {
    */
   async findSnapshots(mappedData, type) {
     try {
+      // Introduce delay before executing the query
+      if (this.config.delay_capture_overview > 0) {
+        await new Promise((resolve) => setTimeout(resolve, this.config.delay_capture_overview));
+      }
+
       const lane = mappedData.lane;
       const minStamp = dayjs(mappedData.stamp)
         .subtract(this.config.minimum_search, "millisecond")
@@ -153,17 +159,17 @@ class SnapshotManager {
       if (!fs.existsSync(filePath)) {
         throw new Error(`File does not exist: ${filePath}`);
       }
-  
+
       const fileName = path.basename(filePath);
-  
+
       // Prepare the form data
       const formData = new FormData();
       formData.append("image", fs.createReadStream(filePath));
       formData.append("fileName", fileName);
-  
+
       // Log the upload attempt for debugging
       console.log(`Uploading file: ${filePath} to ${this.uploadUrl}`);
-  
+
       // Upload the image to the remote server
       const response = await axios.post(this.uploadUrl, formData, {
         headers: {
@@ -171,7 +177,7 @@ class SnapshotManager {
         },
         timeout: 5000, // Adjusted timeout for better handling
       });
-  
+
       // Ensure the response contains the expected fileUrl
       if (response.data && response.data.fileUrl) {
         console.log(`File uploaded successfully: ${response.data.fileUrl}`);
@@ -188,7 +194,6 @@ class SnapshotManager {
       };
     }
   }
-  
 }
 
 module.exports = SnapshotManager;
