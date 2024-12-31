@@ -306,11 +306,11 @@ function isBus(licensePlate) {
  * @param {Object} data - The mapped data object containing GVW and other details.
  * @returns {Boolean} - Returns true if GVW should be ignored, false otherwise.
  */
-function ignoreGVW(data) {
-  if (!data || typeof data.gvw === "undefined") return true; // Ignore if no GVW data
+function ignoreGVW(gvw,gvwIgnored) {
+  if (!gvw || typeof gvw === "undefined") return true; // Ignore if no GVW data
 
   // Example conditions for ignoring GVW
-  if (data.gvw < this.config.gvw_ignored) {
+  if (gvw < gvwIgnored) {
     return true;
   }
   return false; // GVW is valid

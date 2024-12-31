@@ -57,8 +57,7 @@ class DataLogger extends WSController {
     try {
       const rawData = JSON.parse(message);
       let mappedData = mapDataLogger(rawData);
-      if (ignoreGVW(mappedData)) return;
-
+      if (ignoreGVW(mappedData.gvw,this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
       mappedData = setViolation(mappedData, this.vehicleClasses);
