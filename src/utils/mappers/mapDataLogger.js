@@ -100,7 +100,7 @@ function classifyVehicle(data, config) {
 
 // Function to assign violation status
 function setViolation(data, vehiclesClass) {
-  const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_weight_max || 1; // Default to 1 to avoid division by zero
+  const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Default to 1 to avoid division by zero
   if (data.gvw <= gvwMax) {
     data.violation = 0; // No violation
     data.overweight_percentage = 0; // No overweight
@@ -133,7 +133,7 @@ function calculateESAL(data, config, vehiclesClass) {
 
   if (floor === "flexible") {
     data.axles.forEach((element) => {
-      const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_weight_max || 1; // Fallback to 1 to avoid division errors
+      const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Fallback to 1 to avoid division errors
       const weight = safeDivide(data.gvw * element.weight, gvwMax);
       const pt = 2.5;
       const D = thick || 10;
@@ -168,7 +168,7 @@ function calculateESAL(data, config, vehiclesClass) {
 
   if (floor === "rigid") {
     data.axles.forEach((element) => {
-      const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_weight_max || 1;
+      const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1;
       const weight = safeDivide(data.gvw * element.weight, gvwMax);
       const pt = 2.5;
       const D = thick || 10;
