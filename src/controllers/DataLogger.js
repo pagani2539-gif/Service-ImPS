@@ -152,7 +152,7 @@ class DataLogger extends WSController {
           conditionImage, // Dynamic condition image
           mappedData.lane || 1, // Lane number
           this.config.ledServerUrl,
-          '../../public/leds/output/output.png'
+          `../../public/leds/output/output_${mappedData.lane}.png`
         );
       }
     } catch (err) {
