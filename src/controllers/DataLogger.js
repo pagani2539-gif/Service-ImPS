@@ -22,6 +22,7 @@ const pool = require("../config/db");
 const path = require("path");
 const { insertVehicleWithDetails } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
+const baseLedPath = path.join(process.cwd(), "public/leds");
 class DataLogger extends WSController {
   constructor(
     dataWsUrl,
@@ -142,8 +143,8 @@ class DataLogger extends WSController {
       // Create and send LED display image
       // Determine condition image based on `is_overweight`
       const conditionImage = mappedData.is_overweight
-        ? "../../public/leds/layout/overweight.png"
-        : "../../public/leds/layout/passed.png";
+        ? path.join(baseLedPath,"/layout/overweight.png") 
+        : path.join(baseLedPath,"/layout/passed.png") 
 
       // Create and send LED display image
       if (overviewSnapshots) {
@@ -152,7 +153,7 @@ class DataLogger extends WSController {
           conditionImage, // Dynamic condition image
           mappedData.lane || 1, // Lane number
           this.config.led_url,
-          `../../public/leds/output/output_${mappedData.lane}.png`,
+          path.join(baseLedPath,`output/output_${mappedData.lane}.png`),
           this.config.led_enabled,
         );
       }
