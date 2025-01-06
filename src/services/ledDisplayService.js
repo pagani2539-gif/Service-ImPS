@@ -1,7 +1,14 @@
 const sharp = require("sharp");
 const axios = require("axios");
 
-async function createAndSendLedDisplayImage(overviewPath, conditionImage1, laneNo, ledServerUrl, outputPath) {
+async function createAndSendLedDisplayImage(
+  overviewPath,
+  conditionImage1,
+  laneNo,
+  ledServerUrl,
+  outputPath,
+  led_enabled
+) {
   try {
     const totalWidth = 320;
     const totalHeight = 480;
@@ -24,7 +31,9 @@ async function createAndSendLedDisplayImage(overviewPath, conditionImage1, laneN
     });
 
     // Resize condition images and place them on the bottom part
-    const condition1Buffer = await sharp(conditionImage1).resize(140, 76).toBuffer();
+    const condition1Buffer = await sharp(conditionImage1)
+      .resize(140, 76)
+      .toBuffer();
 
     const bottomImageBuffer = await bottomBackground
       .composite([
@@ -48,7 +57,9 @@ async function createAndSendLedDisplayImage(overviewPath, conditionImage1, laneN
       .toBuffer();
 
     // Convert the final image buffer to a base64 Data URL
-    const imageBase64 = `data:image/jpeg;base64,${finalImageBuffer.toString("base64")}`;
+    const imageBase64 = `data:image/jpeg;base64,${finalImageBuffer.toString(
+      "base64"
+    )}`;
 
     // Prepare the payload
     const payload = {
@@ -59,8 +70,10 @@ async function createAndSendLedDisplayImage(overviewPath, conditionImage1, laneN
 
     // Send the image to the LED server
     try {
-      const response = await axios.post(ledServerUrl, payload);
-      console.log("LED display data sent successfully:", response.data);
+      if (led_enabled) {
+        const response = await axios.post(ledServerUrl, payload);
+        console.log("LED display data sent successfully:", response.data);
+      }
 
       // Save the image locally after a successful POST
       await sharp(finalImageBuffer).toFile(outputPath);
@@ -73,4 +86,4 @@ async function createAndSendLedDisplayImage(overviewPath, conditionImage1, laneN
   }
 }
 
-module.exports ={createAndSendLedDisplayImage}
+module.exports = { createAndSendLedDisplayImage };
