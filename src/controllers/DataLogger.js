@@ -1,6 +1,9 @@
 const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
 const {
+  createAndSendLedDisplayImage,
+} = require("../services/ledDisplayService");
+const {
   mapDataLogger,
   classifyVehicle,
   calculateESAL,
@@ -57,7 +60,7 @@ class DataLogger extends WSController {
     try {
       const rawData = JSON.parse(message);
       let mappedData = mapDataLogger(rawData);
-      if (ignoreGVW(mappedData.gvw,this.config.gvw_ignored)) return;
+      if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
       mappedData = setViolation(mappedData, this.vehicleClasses);
@@ -127,7 +130,7 @@ class DataLogger extends WSController {
       if (isBus(mappedData.licensePlate)) {
         return; // Exit early if it's a bus
       }
-      if(hasNonNumericCharacters(mappedData.licensePlate)){
+      if (hasNonNumericCharacters(mappedData.licensePlate)) {
         return;
       }
 
@@ -136,6 +139,22 @@ class DataLogger extends WSController {
 
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
+      // Create and send LED display image
+      // Determine condition image based on `is_overweight`
+      const conditionImage = mappedData.is_overweight
+        ? "../../public/leds/overweight.png"
+        : "../../public/leds/passed.png";
+
+      // Create and send LED display image
+      if (mappedData.overviewPath) {
+        await createAndSendLedDisplayImage(
+          mappedData.overviewPath,
+          conditionImage, // Dynamic condition image
+          mappedData.lane || 1, // Lane number
+          this.config.ledServerUrl,
+          '../../public/leds/output/output.png'
+        );
+      }
     } catch (err) {
       console.error("DataLogger error handling data message:", err);
     }
