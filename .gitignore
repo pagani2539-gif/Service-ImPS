@@ -1,4 +1,5 @@
 node_modules/ 
 public/*
 !public/.gitkeep
-!public/leds/.gitkeep
+# !public/leds/.gitkeep
+!public/leds/*
