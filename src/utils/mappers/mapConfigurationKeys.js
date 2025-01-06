@@ -31,6 +31,8 @@ function mapConfigurationKeys(config) {
       streaming_url: config.streaming_url || JSON.stringify([]),
       capture_overview: config.capture_overview || JSON.stringify([]),
       capture_lpr: config.capture_lpr || JSON.stringify([]),
+      led_url: config.led_url || '',
+      led_enabled: config.led_enabled || 0,
     };
   }
   
