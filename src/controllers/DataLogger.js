@@ -142,8 +142,8 @@ class DataLogger extends WSController {
       // Create and send LED display image
       // Determine condition image based on `is_overweight`
       const conditionImage = mappedData.is_overweight
-        ? "../../public/leds/overweight.png"
-        : "../../public/leds/passed.png";
+        ? "../../public/leds/layout/overweight.png"
+        : "../../public/leds/layout/passed.png";
 
       // Create and send LED display image
       if (mappedData.overviewPath) {
