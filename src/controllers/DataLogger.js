@@ -146,9 +146,9 @@ class DataLogger extends WSController {
         : "../../public/leds/layout/passed.png";
 
       // Create and send LED display image
-      if (mappedData.overviewPath) {
+      if (overviewSnapshots) {
         await createAndSendLedDisplayImage(
-          mappedData.overviewPath,
+          overviewSnapshots,
           conditionImage, // Dynamic condition image
           mappedData.lane || 1, // Lane number
           this.config.led_url,
