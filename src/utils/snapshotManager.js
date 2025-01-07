@@ -27,6 +27,7 @@ class SnapshotManager {
         timeout: 3000,
       });
       if (response.status === 200) {
+        console.log('response ',type,dayjs().format('HH:mm:ss.SSSZ'));
         // Extract year, month, and day from the timestamp
         const date = dayjs(stamp);
         const year = date.format("YYYY");
