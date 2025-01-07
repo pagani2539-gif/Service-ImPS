@@ -56,7 +56,7 @@ class WSController {
     throw new Error("handleDataMessage must be implemented in the derived class.");
   }
 
-  async handleTriggerMessage(message) {
+  handleTriggerMessage(message) {
     throw new Error("handleTriggerMessage must be implemented in the derived class.");
   }
 

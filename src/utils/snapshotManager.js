@@ -21,13 +21,12 @@ class SnapshotManager {
     const { lane, type, stamp } = metadata;
 
     try {
-      console.log('snap ',type,dayjs().format('HH:mm:ss.SSSZ'));
+      // console.log('snap ',type,dayjs().format('HH:mm:ss.SSSZ'));
       const response = await axios.get(url, {
         responseType: "arraybuffer",
         timeout: 3000,
       });
       if (response.status === 200) {
-        console.log('response ',type,dayjs().format('HH:mm:ss.SSSZ'));
         // Extract year, month, and day from the timestamp
         const date = dayjs(stamp);
         const year = date.format("YYYY");
