@@ -175,7 +175,7 @@ class DataLogger extends WSController {
       const channelId = `TH${rawTriggerData.data.ChannelId}`;
       const rawTime = rawTriggerData.data.Time;
 
-      if (eventId === "presence-event") return;
+      if (eventId === "force-event") return;
       if (!channelId || !rawTime) {
         console.warn("Missing ChanelId or Time in trigger message");
         return;
