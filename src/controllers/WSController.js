@@ -57,7 +57,6 @@ class WSController {
   }
 
   async handleTriggerMessage(message) {
-    console.log(`[${dayjs().format("YYYY-MM-DD HH:mm:ss.SSSZ")}] Trigger Message Received:`);
     throw new Error("handleTriggerMessage must be implemented in the derived class.");
   }
 

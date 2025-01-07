@@ -169,8 +169,9 @@ class DataLogger extends WSController {
 
   async handleTriggerMessage(message) {
     try {
+      console.log('received trigger message',dayjs().format('HH:mm:ss.SSSZ'));
       const rawTriggerData = JSON.parse(message);
-      //   console.log("DataLogger received trigger message:", rawTriggerData);
+        // console.log("DataLogger received trigger message:", rawTriggerData);
       const eventId = rawTriggerData["event-id"];
       const channelId = `TH${rawTriggerData.data.ChannelId}`;
       const rawTime = rawTriggerData.data.Time;
