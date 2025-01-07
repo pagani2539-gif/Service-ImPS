@@ -78,54 +78,55 @@ class DataLogger extends WSController {
         this.overviewSnapshotManager.findSnapshots(mappedData, "overview"),
       ]);
 
-      if (lprSnapshots) {
-        const ocrResult = await ocrService.sendToOCR(
-          lprSnapshots,
-          this.config.ocr_url
-        );
 
+      if (lprSnapshots || overviewSnapshots) {
+        // Concurrently send LPR snapshots to OCR and upload the overview image
+        const [ocrResult, overviewUploadResult] = await Promise.all([
+          lprSnapshots
+            ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
+            : Promise.resolve(null), // No OCR if no LPR snapshots
+          overviewSnapshots
+            ? this.overviewSnapshotManager.uploadImage(
+                overviewSnapshots.imageUrl,
+                "overview"
+              )
+            : Promise.resolve({ success: false }), // No upload if no overview snapshots
+        ]);
+      
+        // Process OCR results and perform crop/lpr uploads
         if (ocrResult) {
-          // Use Promise.all for concurrent image uploads
           const [plateUploadResult, cropUploadResult] = await Promise.all([
             ocrResult.plate_path
               ? this.lprSnapshotManager.uploadImage(ocrResult.plate_path, "lpr")
               : Promise.resolve({ success: false }),
             ocrResult.crop_path
-              ? this.cropSnapshotManager.uploadImage(
-                  ocrResult.crop_path,
-                  "crop"
-                )
+              ? this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
               : Promise.resolve({ success: false }),
           ]);
-
+      
+          // Update OCR data with uploaded file paths
           if (plateUploadResult.success) {
-            ocrResult.plate_path = plateUploadResult.data.fileUrl; // Update with uploaded file path
+            ocrResult.plate_path = plateUploadResult.data.fileUrl;
           }
           if (cropUploadResult.success) {
-            ocrResult.crop_path = cropUploadResult.data.fileUrl; // Update with uploaded file path
+            ocrResult.crop_path = cropUploadResult.data.fileUrl;
           }
-
-          // Update mappedData with the modified ocrResult
+      
+          // Update mappedData with OCR results
           mappedData.platePath = ocrResult.plate_path;
           mappedData.licensePlate = ocrResult.license_plate;
           mappedData.cropPath = ocrResult.crop_path;
           mappedData.province = ocrResult.province;
         }
-      }
-
-      if (overviewSnapshots) {
-        const overviewUploadResult =
-          await this.overviewSnapshotManager.uploadImage(
-            overviewSnapshots.imageUrl,
-            "overview"
-          );
+      
+        // Update overview path if the upload was successful
         if (overviewUploadResult.success) {
-          mappedData.overviewPath = overviewUploadResult.data.fileUrl; // Update with uploaded file path
+          mappedData.overviewPath = overviewUploadResult.data.fileUrl;
         }
       } else {
-        console.warn("No Overview snapshots found.");
+        console.warn("No LPR or Overview snapshots found.");
       }
-
+      
       // Proceed to save the data only after all uploads are confirmed
       // Check if the vehicle is a bus
       if (isBus(mappedData.licensePlate)) {
