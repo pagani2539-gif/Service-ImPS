@@ -2,3 +2,4 @@ node_modules/
 public/snapshots/*
 !public/.gitkeep
 !public/leds/.gitkeep
+public/leds/output/*.jpeg
