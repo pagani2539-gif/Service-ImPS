@@ -21,6 +21,7 @@ class SnapshotManager {
     const { lane, type, stamp } = metadata;
 
     try {
+      console.log('snap ',type,dayjs().format('HH:mm:ss.SSSZ'));
       const response = await axios.get(url, {
         responseType: "arraybuffer",
         timeout: 3000,

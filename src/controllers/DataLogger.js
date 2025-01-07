@@ -210,6 +210,7 @@ class DataLogger extends WSController {
             lane: channelId,
           };
 
+          
           // Proceed with capturing snapshots
           this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
             ...metadata,
