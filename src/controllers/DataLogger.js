@@ -176,6 +176,7 @@ class DataLogger extends WSController {
       const rawTime = rawTriggerData.data.Time;
 
       if (eventId != "force-event") return;
+      console.log(eventId,rawTime,dayjs().format('HH:mm:ss.SSSZ'));
       if (!channelId || !rawTime) {
         console.warn("Missing ChanelId or Time in trigger message");
         return;
@@ -210,12 +211,12 @@ class DataLogger extends WSController {
           };
 
           // Proceed with capturing snapshots
-          await this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
+          this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
             ...metadata,
             type: "lpr",
           });
 
-          await this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
+          this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
             ...metadata,
             type: "overview",
           });
