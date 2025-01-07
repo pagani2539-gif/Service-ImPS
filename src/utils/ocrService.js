@@ -42,7 +42,7 @@ module.exports = {
       // Process OCR response
       if (response.data.plate) {
         const ocrResult = {
-          license_plate: response.data.plate.license_plate,
+          license_plate: formatLicensePlate(response.data.plate.license_plate),
           province: response.data.plate.province,
           position: response.data.plate.position,
           plate_path: response.data.plate.plate_path,
@@ -108,5 +108,25 @@ module.exports = {
       console.error("Error cropping image:", err);
       throw err;
     }
+  },
+
+  /**
+   * Inserts a dash into the license plate if all characters are numeric.
+   * - If length is 6, inserts a dash at index 3.
+   * - If length is 7, inserts a dash at index 4.
+   * @param {string} licensePlate - The license plate string.
+   * @returns {string} - Modified license plate string with a dash or the original string.
+   */
+  formatLicensePlate(licensePlate) {
+    if (/^\d+$/.test(licensePlate)) {
+      // Check if all characters are numbers
+      if (licensePlate.length === 6) {
+        return licensePlate.slice(0, 3) + "-" + licensePlate.slice(3);
+      }
+      if (licensePlate.length === 7) {
+        return licensePlate.slice(0, 4) + "-" + licensePlate.slice(4);
+      }
+    }
+    return licensePlate; // Return the original string if conditions are not met
   },
 };
