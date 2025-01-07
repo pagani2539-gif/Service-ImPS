@@ -78,10 +78,9 @@ class DataLogger extends WSController {
         this.overviewSnapshotManager.findSnapshots(mappedData, "overview"),
       ]);
 
-
       if (lprSnapshots || overviewSnapshots) {
-        // Concurrently send LPR snapshots to OCR and upload the overview image
-        const [ocrResult, overviewUploadResult] = await Promise.all([
+        // Concurrently send LPR snapshots to OCR, upload LPR image, and upload the overview image
+        const [ocrResult, overviewUploadResult, lprUploadResult] = await Promise.all([
           lprSnapshots
             ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
             : Promise.resolve(null), // No OCR if no LPR snapshots
@@ -91,22 +90,20 @@ class DataLogger extends WSController {
                 "overview"
               )
             : Promise.resolve({ success: false }), // No upload if no overview snapshots
+          lprSnapshots
+            ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
+            : Promise.resolve({ success: false }), // No upload if no LPR snapshots
         ]);
       
-        // Process OCR results and perform crop/lpr uploads
+        // Process OCR results and perform crop uploads if OCR is not null
         if (ocrResult) {
-          const [plateUploadResult, cropUploadResult] = await Promise.all([
-            ocrResult.plate_path
-              ? this.lprSnapshotManager.uploadImage(ocrResult.plate_path, "lpr")
-              : Promise.resolve({ success: false }),
-            ocrResult.crop_path
-              ? this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
-              : Promise.resolve({ success: false }),
-          ]);
+          const cropUploadResult = ocrResult.crop_path
+            ? await this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
+            : { success: false };
       
           // Update OCR data with uploaded file paths
-          if (plateUploadResult.success) {
-            ocrResult.plate_path = plateUploadResult.data.fileUrl;
+          if (lprUploadResult.success) {
+            ocrResult.plate_path = lprUploadResult.data.fileUrl;
           }
           if (cropUploadResult.success) {
             ocrResult.crop_path = cropUploadResult.data.fileUrl;
@@ -117,6 +114,12 @@ class DataLogger extends WSController {
           mappedData.licensePlate = ocrResult.license_plate;
           mappedData.cropPath = ocrResult.crop_path;
           mappedData.province = ocrResult.province;
+        } else {
+          // Handle case where OCR result is null
+          if (lprUploadResult.success) {
+            mappedData.platePath = lprUploadResult.data.fileUrl;
+          }
+          console.warn("OCR result is null. LPR snapshot uploaded.");
         }
       
         // Update overview path if the upload was successful
@@ -127,6 +130,7 @@ class DataLogger extends WSController {
         console.warn("No LPR or Overview snapshots found.");
       }
       
+
       // Proceed to save the data only after all uploads are confirmed
       // Check if the vehicle is a bus
       if (isBus(mappedData.licensePlate)) {
@@ -144,8 +148,8 @@ class DataLogger extends WSController {
       // Create and send LED display image
       // Determine condition image based on `is_overweight`
       const conditionImage = mappedData.is_overweight
-        ? path.join(baseLedPath,"/layout/overweight.jpg") 
-        : path.join(baseLedPath,"/layout/passed.jpg") 
+        ? path.join(baseLedPath, "/layout/overweight.jpg")
+        : path.join(baseLedPath, "/layout/passed.jpg");
 
       // Create and send LED display image
       if (overviewSnapshots) {
@@ -154,8 +158,8 @@ class DataLogger extends WSController {
           conditionImage, // Dynamic condition image
           mappedData.lane || 1, // Lane number
           this.config.led_url,
-          path.join(baseLedPath,`output/output_${mappedData.lane}.jpeg`),
-          this.config.led_enabled,
+          path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
+          this.config.led_enabled
         );
       }
     } catch (err) {
