@@ -42,7 +42,7 @@ module.exports = {
       // Process OCR response
       if (response.data.plate) {
         const ocrResult = {
-          license_plate: formatLicensePlate(response.data.plate.license_plate),
+          license_plate: this.formatLicensePlate(response.data.plate.license_plate),
           province: response.data.plate.province,
           position: response.data.plate.position,
           plate_path: response.data.plate.plate_path,
