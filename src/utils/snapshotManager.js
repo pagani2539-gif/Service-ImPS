@@ -3,8 +3,6 @@ const fs = require("fs-extra");
 const path = require("path");
 const dayjs = require("dayjs");
 const FormData = require("form-data"); // Import form-data
-const fetch = require("node-fetch"); 
-
 
 class SnapshotManager {
   constructor(pool, config, uploadUrl, baseImagePath) {
@@ -23,6 +21,12 @@ class SnapshotManager {
     const { lane, type, stamp } = metadata;
 
     try {
+      // console.log('snap ',type,dayjs().format('HH:mm:ss.SSSZ'));
+      const response = await axios.get(url, {
+        responseType: "arraybuffer",
+        timeout: 3000,
+      });
+      if (response.status === 200) {
         // Extract year, month, and day from the timestamp
         const date = dayjs(stamp);
         const year = date.format("YYYY");
@@ -35,43 +39,37 @@ class SnapshotManager {
 
         // Construct file path with year/month/day structure
         const filePath = path.join(
-            this.baseImagePath,
-            year,
-            month,
-            day,
-            lane,
-            filename
+          this.baseImagePath,
+          year,
+          month,
+          day,
+          lane,
+          filename
         );
 
         // Ensure the directory exists
         await fs.ensureDir(path.dirname(filePath));
 
-        // Fetch the snapshot and save it locally
-        const response = await fetch(url, { timeout: 3000 });
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch snapshot: ${response.status}`);
-        }
-
-        const buffer = await response.buffer();
-
         // Save the image to the file system
-        await fs.writeFile(filePath, buffer);
+        await fs.writeFile(filePath, response.data);
 
         // Construct the image URL with year/month/day structure
         const imageUrl = filePath;
 
         // Save snapshot to the database
         await this.pool.execute(
-            `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-            [lane, type, new Date(stamp), imageUrl]
+          `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+          [lane, type, new Date(stamp), imageUrl]
         );
 
-        console.log(`Snapshot saved to database with URL: ${imageUrl}`);
+        // console.log(`Snapshot saved to database with URL: ${imageUrl}`);
+      } else {
+        throw new Error(`Failed to fetch snapshot: ${response.status}`);
+      }
     } catch (err) {
-        console.error(`Error taking snapshot for lane ${lane}, type ${type}:`, err);
+      console.error(`Error taking snapshot for lane ${lane}, type ${type}:`);
     }
-}
+  }
 
   /**
    * Finds snapshots within a given time range for a specific lane.
