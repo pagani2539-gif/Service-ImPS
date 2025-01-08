@@ -58,19 +58,19 @@ class DataLogger {
 
   initWebSocketClients() {
     // WebSocket for data messages
-    this.dataWebSocket = new WebSocket(this.dataWsUrl);
-    this.dataWebSocket.on("open", () => {
-      console.log("Data WebSocket connection opened");
-    });
-    this.dataWebSocket.on("message", (message) =>
-      this.handleDataMessage(message)
-    );
-    this.dataWebSocket.on("error", (error) => {
-      console.error("Data WebSocket error:", error);
-    });
-    this.dataWebSocket.on("close", () => {
-      console.log("Data WebSocket connection closed");
-    });
+    // this.dataWebSocket = new WebSocket(this.dataWsUrl);
+    // this.dataWebSocket.on("open", () => {
+    //   console.log("Data WebSocket connection opened");
+    // });
+    // this.dataWebSocket.on("message", (message) =>
+    //   this.handleDataMessage(message)
+    // );
+    // this.dataWebSocket.on("error", (error) => {
+    //   console.error("Data WebSocket error:", error);
+    // });
+    // this.dataWebSocket.on("close", () => {
+    //   console.log("Data WebSocket connection closed");
+    // });
 
     // WebSocket for trigger messages
     this.triggerWebSocket = new WebSocket(this.triggerWsUrl);
