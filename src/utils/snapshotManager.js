@@ -20,19 +20,24 @@ class SnapshotManager {
   async takeSnapshot(url, metadata) {
     const { lane, type, stamp } = metadata;
 
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer', // Ensure binary data
-      timeout: 3000
-    });
-
-    // Construct the image path with rawTime
-    const subFolder = dayjs(stamp).format("YYYY/MM/DD/")
-    const timestamp = dayjs(stamp).format("YYYY_MM_DD_HH_mm_ss");
-    const filename = `${type}_${lane}_${timestamp}.jpg`;
-    const dirPath = path.join(this.baseImagePath, subFolder, lane);
-    const filePath = path.join(dirPath, filename);
-
-    fs.writeFileSync(filePath, response.data);
+    try {
+      
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer', // Ensure binary data
+        timeout: 3000
+      });
+  
+      // Construct the image path with rawTime
+      const subFolder = dayjs(stamp).format("YYYY/MM/DD/")
+      const timestamp = dayjs(stamp).format("YYYY_MM_DD_HH_mm_ss");
+      const filename = `${type}_${lane}_${timestamp}.jpg`;
+      const dirPath = path.join(this.baseImagePath, subFolder, lane);
+      const filePath = path.join(dirPath, filename);
+  
+      fs.writeFileSync(filePath, response.data);
+    } catch (error) {
+      
+    }
 
     // Download image from the URL
     // axios
