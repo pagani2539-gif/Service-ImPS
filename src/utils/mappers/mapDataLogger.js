@@ -112,14 +112,15 @@ function setViolation(data, vehiclesClass) {
   return data;
 }
 
-function setSingleTire(data,singleTires) {
-  const vehicleClass = singleTires.find(item=>item.vehicle_class_id === data.vehicleClassID)
+function setSingleTire(data, singleTires) {
+  const vehicleClass = singleTires.find(
+    (item) => item.vehicle_class_id === data.vehicleClassID
+  );
   vehicleClass.axle_positions.forEach((element) => {
     data.axles[element].dualTire = false;
   });
-  return data
-
-};
+  return data;
+}
 
 // Function to calculate ESAL (Equivalent Single Axle Load)
 function calculateESAL(data, config, vehiclesClass) {
@@ -205,7 +206,6 @@ function calculateESAL(data, config, vehiclesClass) {
   return data;
 }
 
-
 // Mapping logic for DataLogger
 function mapDataLogger(rawData) {
   let axles = [];
@@ -275,6 +275,25 @@ function mapDataLogger(rawData) {
 }
 
 /**
+ * Inserts a dash into the license plate if all characters are numeric.
+ * - If length is 6, inserts a dash at index 3.
+ * - If length is 7, inserts a dash at index 4.
+ * @param {string} licensePlate - The license plate string.
+ * @returns {string} - Modified license plate string with a dash or the original string.
+ */
+function formatLicensePlate(licensePlate) {
+  if (/^\d+$/.test(licensePlate)) {
+    // Check if all characters are numbers
+    if (licensePlate.length === 6) {
+      return licensePlate.slice(0, 2) + "-" + licensePlate.slice(2);
+    }
+    if (licensePlate.length === 7) {
+      return licensePlate.slice(0, 3) + "-" + licensePlate.slice(3);
+    }
+  }
+  return licensePlate; // Return the original string if conditions are not met
+}
+/**
  * Check if the vehicle is a bus based on the license plate.
  * @param {String} licensePlate - The license plate of the vehicle.
  * @returns {Boolean} - Returns true if the vehicle is identified as a bus, false otherwise.
@@ -288,11 +307,9 @@ function isBus(licensePlate) {
   // Check if it meets the bus criteria
   if (
     licensePlateArr.length > 1 &&
-    (
-      ["1", "2", "3", "4"].includes(licensePlateArr[0]) || // Starts with specific numbers
+    (["1", "2", "3", "4"].includes(licensePlateArr[0]) || // Starts with specific numbers
       isNaN(parseInt(licensePlateArr[0])) || // First character is not a number
-      isNaN(parseInt(licensePlateArr[1])) // Second character is not a number
-    )
+      isNaN(parseInt(licensePlateArr[1]))) // Second character is not a number
   ) {
     return true; // It's a bus
   }
@@ -300,13 +317,12 @@ function isBus(licensePlate) {
   return false; // Not a bus
 }
 
-
 /**
  * Check if the GVW should be ignored based on predefined conditions.
  * @param {Object} data - The mapped data object containing GVW and other details.
  * @returns {Boolean} - Returns true if GVW should be ignored, false otherwise.
  */
-function ignoreGVW(gvw,gvwIgnored) {
+function ignoreGVW(gvw, gvwIgnored) {
   if (!gvw || typeof gvw === "undefined") return true; // Ignore if no GVW data
 
   // Example conditions for ignoring GVW
@@ -324,10 +340,9 @@ function ignoreGVW(gvw,gvwIgnored) {
 function hasNonNumericCharacters(licensePlate) {
   if (!licensePlate || typeof licensePlate !== "string") return false; // Handle null or invalid input
 
-  // Check if the license plate contains any non-numeric character except dash (-)
-  return /[^0-9-]/.test(licensePlate); // Matches any character that is not a digit (0-9) or a dash (-)
+  // Check if the license plate contains any non-numeric character
+  return /[^0-9]/.test(licensePlate); // Matches any character that is not a digit (0-9)
 }
-
 
 module.exports = {
   mapDataLogger,
@@ -339,5 +354,5 @@ module.exports = {
   setSingleTire,
   isBus,
   ignoreGVW,
-  hasNonNumericCharacters
+  hasNonNumericCharacters,
 };
