@@ -48,7 +48,7 @@ class SnapshotManager {
         );
 
         // Ensure the directory exists
-        // await fs.ensureDir(path.dirname(filePath));
+        await fs.ensureDir(path.dirname(filePath));
 
         // Save the image to the file system
         fs.writeFile(filePath, response.data);
