@@ -57,8 +57,7 @@ class SnapshotManager {
       })
       .catch((err) => {
         console.error(
-          `Error while capturing snapshot for lane ${lane}, type ${type}:`,
-          err
+          `Error while capturing snapshot for lane ${lane}, type ${type}`
         );
       });
   }
