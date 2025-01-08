@@ -38,22 +38,22 @@ class SnapshotManager {
 
         const dirPath = path.join(this.baseImagePath, year, month, day, lane);
         const filePath = path.join(dirPath, filename);
-
+        fs.writeFile(filePath, response.data)
         // Ensure the directory exists and write the file
-        return fs
-          .ensureDir(dirPath)
-          .then(() => fs.writeFile(filePath, response.data)) // Save the file
-          .then(() => {
-            // console.log(`File saved at ${filePath}`);
-            // Insert snapshot metadata into the database
-            // return this.pool.execute(
-            //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-            //   [lane, type, new Date(stamp), filePath]
-            // );
-          })
-          .then(() => {
-            console.log(`Snapshot data saved in the database: ${filePath}`);
-          });
+        // return fs
+        //   .ensureDir(dirPath)
+        //   .then(() => fs.writeFile(filePath, response.data)) // Save the file
+        //   .then(() => {
+        //     // console.log(`File saved at ${filePath}`);
+        //     // Insert snapshot metadata into the database
+        //     // return this.pool.execute(
+        //     //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+        //     //   [lane, type, new Date(stamp), filePath]
+        //     // );
+        //   })
+        //   .then(() => {
+        //     console.log(`Snapshot data saved in the database: ${filePath}`);
+        //   });
       })
       .catch((err) => {
         console.error(
