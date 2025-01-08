@@ -293,12 +293,36 @@ function formatLicensePlate(licensePlate) {
   }
   return licensePlate; // Return the original string if conditions are not met
 }
+
+/**
+ * Check if the vehicle is a bus based on the wheelbase.
+ * @param {Number} wheelbase - The wheelbase of the vehicle in millimeters (or appropriate units).
+ * @param {Number} minimumWheelbase - The minimum wheelbase required to classify the vehicle as a bus.
+ * @returns {Boolean} - Returns true if the vehicle is identified as a bus, false otherwise.
+ */
+function isBusByWheelbase(wheelbase, minimumWheelbase) {
+  if (
+    !wheelbase || typeof wheelbase !== "number" || 
+    !minimumWheelbase || typeof minimumWheelbase !== "number"
+  ) {
+    return false; // Invalid input
+  }
+
+  // Check if the wheelbase meets the minimum requirement for a bus
+  if (wheelbase >= minimumWheelbase) {
+    return true; // It's a bus
+  }
+
+  return false; // Not a bus
+}
+
+
 /**
  * Check if the vehicle is a bus based on the license plate.
  * @param {String} licensePlate - The license plate of the vehicle.
  * @returns {Boolean} - Returns true if the vehicle is identified as a bus, false otherwise.
  */
-function isBus(licensePlate) {
+function isBusByLicensePlate(licensePlate) {
   if (!licensePlate || typeof licensePlate !== "string") return false;
 
   // Split the license plate into characters
@@ -352,8 +376,9 @@ module.exports = {
   mapWarningFlag,
   mapErrorFlag,
   setSingleTire,
-  isBus,
+  isBusByLicensePlate,
   ignoreGVW,
   hasNonNumericCharacters,
-  formatLicensePlate
+  formatLicensePlate,
+  isBusByWheelbase
 };

@@ -14,7 +14,8 @@ const {
   isBusByLicensePlate,
   ignoreGVW,
   hasNonNumericCharacters,
-  formatLicensePlate
+  formatLicensePlate,
+  isBusByWheelbase
 } = require("../utils/mappers/mapDataLogger");
 const SnapshotManager = require("../utils/snapshotManager");
 const dayjs = require("dayjs");
@@ -102,7 +103,7 @@ class DataLogger extends WSController {
 
         // Process OCR results and perform crop uploads if OCR is not null
         if (ocrResult) {
-          if ([1, 2].includes(mappedData.vehicleClassID)){
+          if ([1, 2].includes(mappedData.vehicleClassID)) {
             // Check if the vehicle is a bus
             if (isBusByLicensePlate(ocrResult.license_plate)) {
               return; // Exit early if it's a bus
@@ -110,23 +111,6 @@ class DataLogger extends WSController {
             if (hasNonNumericCharacters(ocrResult.license_plate)) {
               return;
             }
-          }
-          // Create and send LED display image
-          // Determine condition image based on `is_overweight`
-          const conditionImage = mappedData.is_overweight
-            ? path.join(baseLedPath, "/layout/overweight.jpg")
-            : path.join(baseLedPath, "/layout/passed.jpg");
-
-          // Create and send LED display image
-          if (overviewSnapshots) {
-            createAndSendLedDisplayImage(
-              overviewSnapshots.imageUrl,
-              conditionImage, // Dynamic condition image
-              mappedData.lane || 1, // Lane number
-              this.config.led_url,
-              path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
-              this.config.led_enabled
-            );
           }
 
           const cropUploadResult = ocrResult.crop_path
@@ -163,6 +147,23 @@ class DataLogger extends WSController {
         }
       } else {
         console.warn("No LPR or Overview snapshots found.");
+      }
+      // Create and send LED display image
+      // Determine condition image based on `is_overweight`
+      const conditionImage = mappedData.is_overweight
+        ? path.join(baseLedPath, "/layout/overweight.jpg")
+        : path.join(baseLedPath, "/layout/passed.jpg");
+
+      // Create and send LED display image
+      if (overviewSnapshots) {
+        createAndSendLedDisplayImage(
+          overviewSnapshots.imageUrl,
+          conditionImage, // Dynamic condition image
+          mappedData.lane || 1, // Lane number
+          this.config.led_url,
+          path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
+          this.config.led_enabled
+        );
       }
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
