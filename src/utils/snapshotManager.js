@@ -24,7 +24,7 @@ class SnapshotManager {
       // console.log('snap ',type,dayjs().format('HH:mm:ss.SSSZ'));
       const response = await axios.get(url, {
         responseType: "arraybuffer",
-        timeout: 3000,
+        // timeout: 3000,
       });
       if (response.status === 200) {
         // Extract year, month, and day from the timestamp
