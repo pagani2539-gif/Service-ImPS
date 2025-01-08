@@ -1,4 +1,4 @@
-const WSController = require("./WSController");
+const WebSocket = require("ws");
 const { sendToWebSocket } = require("../services/wsService");
 const {
   createAndSendLedDisplayImage,
@@ -23,17 +23,15 @@ const path = require("path");
 const { insertVehicleWithDetails } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
-class DataLogger extends WSController {
-  constructor(
-    dataWsUrl,
-    triggerWsUrl,
-    reconnectInterval,
-    config,
-    vehicleClasses,
-    singleTires
-  ) {
-    super(dataWsUrl, triggerWsUrl, reconnectInterval);
+
+class DataLogger {
+  constructor(dataWsUrl, triggerWsUrl, config, vehicleClasses, singleTires) {
+    this.dataWsUrl = dataWsUrl;
+    this.triggerWsUrl = triggerWsUrl;
     this.config = config;
+    this.vehicleClasses = vehicleClasses;
+    this.singleTires = singleTires;
+
     // Initialize SnapshotManager for LPR and Overview
     this.lprSnapshotManager = new SnapshotManager(
       pool,
@@ -53,8 +51,41 @@ class DataLogger extends WSController {
       process.env.IMAGE_OVERVIEW_UPLOAD_URL,
       baseImagePath
     );
-    this.vehicleClasses = vehicleClasses;
-    this.singleTires = singleTires;
+
+    // Initialize WebSocket clients
+    this.initWebSocketClients();
+  }
+
+  initWebSocketClients() {
+    // WebSocket for data messages
+    this.dataWebSocket = new WebSocket(this.dataWsUrl);
+    this.dataWebSocket.on("open", () => {
+      console.log("Data WebSocket connection opened");
+    });
+    this.dataWebSocket.on("message", (message) =>
+      this.handleDataMessage(message)
+    );
+    this.dataWebSocket.on("error", (error) => {
+      console.error("Data WebSocket error:", error);
+    });
+    this.dataWebSocket.on("close", () => {
+      console.log("Data WebSocket connection closed");
+    });
+
+    // WebSocket for trigger messages
+    this.triggerWebSocket = new WebSocket(this.triggerWsUrl);
+    this.triggerWebSocket.on("open", () => {
+      console.log("Trigger WebSocket connection opened");
+    });
+    this.triggerWebSocket.on("message", (message) =>
+      this.handleTriggerMessage(message)
+    );
+    this.triggerWebSocket.on("error", (error) => {
+      console.error("Trigger WebSocket error:", error);
+    });
+    this.triggerWebSocket.on("close", () => {
+      console.log("Trigger WebSocket connection closed");
+    });
   }
 
   async handleDataMessage(message) {
@@ -69,94 +100,75 @@ class DataLogger extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
 
-      // const lprSnapshots = await this.lprSnapshotManager.findSnapshots(mappedData, "lpr");
-      // const overviewSnapshots = await this.overviewSnapshotManager.findSnapshots(mappedData, "overview");
-
-      // Use Promise.all for concurrent snapshot fetching
       const [lprSnapshots, overviewSnapshots] = await Promise.all([
         this.lprSnapshotManager.findSnapshots(mappedData, "lpr"),
         this.overviewSnapshotManager.findSnapshots(mappedData, "overview"),
       ]);
 
       if (lprSnapshots || overviewSnapshots) {
-        // Concurrently send LPR snapshots to OCR, upload LPR image, and upload the overview image
         const [ocrResult, overviewUploadResult, lprUploadResult] = await Promise.all([
           lprSnapshots
             ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
-            : Promise.resolve(null), // No OCR if no LPR snapshots
+            : Promise.resolve(null),
           overviewSnapshots
             ? this.overviewSnapshotManager.uploadImage(
                 overviewSnapshots.imageUrl,
                 "overview"
               )
-            : Promise.resolve({ success: false }), // No upload if no overview snapshots
+            : Promise.resolve({ success: false }),
           lprSnapshots
             ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
-            : Promise.resolve({ success: false }), // No upload if no LPR snapshots
+            : Promise.resolve({ success: false }),
         ]);
-      
-        // Process OCR results and perform crop uploads if OCR is not null
+
         if (ocrResult) {
           const cropUploadResult = ocrResult.crop_path
             ? await this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
             : { success: false };
-      
-          // Update OCR data with uploaded file paths
+
           if (lprUploadResult.success) {
             ocrResult.plate_path = lprUploadResult.data.fileUrl;
           }
           if (cropUploadResult.success) {
             ocrResult.crop_path = cropUploadResult.data.fileUrl;
           }
-      
-          // Update mappedData with OCR results
+
           mappedData.platePath = ocrResult.plate_path;
           mappedData.licensePlate = ocrResult.license_plate;
           mappedData.cropPath = ocrResult.crop_path;
           mappedData.province = ocrResult.province;
         } else {
-          // Handle case where OCR result is null
           if (lprUploadResult.success) {
             mappedData.platePath = lprUploadResult.data.fileUrl;
           }
           console.warn("OCR result is null. LPR snapshot uploaded.");
         }
-      
-        // Update overview path if the upload was successful
+
         if (overviewUploadResult.success) {
           mappedData.overviewPath = overviewUploadResult.data.fileUrl;
         }
       } else {
         console.warn("No LPR or Overview snapshots found.");
       }
-      
 
-      // Proceed to save the data only after all uploads are confirmed
-      // Check if the vehicle is a bus
-      if (isBus(mappedData.licensePlate)) {
-        return; // Exit early if it's a bus
-      }
-      if (hasNonNumericCharacters(mappedData.licensePlate)) {
+      if (isBus(mappedData.licensePlate) || hasNonNumericCharacters(mappedData.licensePlate)) {
         return;
       }
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
 
-      // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
-      // Create and send LED display image
-      // Determine condition image based on `is_overweight`
+
       const conditionImage = mappedData.is_overweight
         ? path.join(baseLedPath, "/layout/overweight.jpg")
         : path.join(baseLedPath, "/layout/passed.jpg");
 
-      // Create and send LED display image
       if (overviewSnapshots) {
         await createAndSendLedDisplayImage(
           overviewSnapshots.imageUrl,
-          conditionImage, // Dynamic condition image
-          mappedData.lane || 1, // Lane number
+          conditionImage,
+          mappedData.lane || 1,
           this.config.led_url,
           path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
           this.config.led_enabled
@@ -169,62 +181,51 @@ class DataLogger extends WSController {
 
   async handleTriggerMessage(message) {
     try {
-      console.log('received trigger message',dayjs().format('HH:mm:ss.SSSZ'));
+      console.log('Received trigger message', dayjs().format('HH:mm:ss.SSSZ'));
       const rawTriggerData = JSON.parse(message);
-        // console.log("DataLogger received trigger message:", rawTriggerData);
       const eventId = rawTriggerData["event-id"];
       const channelId = `TH${rawTriggerData.data.ChannelId}`;
       const rawTime = rawTriggerData.data.Time;
 
-      if (eventId != "force-event") return;
-      console.log(eventId,rawTime,dayjs().format('HH:mm:ss.SSSZ'));
+      if (eventId !== "force-event") return;
+
+      console.log(eventId, rawTime, dayjs().format('HH:mm:ss.SSSZ'));
       if (!channelId || !rawTime) {
-        console.warn("Missing ChanelId or Time in trigger message");
+        console.warn("Missing ChannelId or Time in trigger message");
         return;
       }
 
       if (rawTriggerData.data.TriggerType === "Start") {
-        try {
-          // Find the LPR snapshot URL for the given channelId
-          const lprSnapshotConfig = this.config.capture_lpr.find(
-            (item) => item.lane === channelId
-          );
+        const lprSnapshotConfig = this.config.capture_lpr.find(
+          (item) => item.lane === channelId
+        );
 
-          // Find the Overview snapshot URL for the given channelId
-          const overviewSnapshotConfig = this.config.capture_overview.find(
-            (item) => item.lane === channelId
-          );
+        const overviewSnapshotConfig = this.config.capture_overview.find(
+          (item) => item.lane === channelId
+        );
 
-          if (!lprSnapshotConfig || !overviewSnapshotConfig) {
-            console.warn(
-              `Snapshot configuration not found for lane ${channelId}`
-            );
-            return; // Exit if configuration is missing
-          }
-
-          const lprSnapshotUrl = lprSnapshotConfig.snapCode;
-          const overviewSnapshotUrl = overviewSnapshotConfig.snapCode;
-
-          // Metadata for snapshot
-          const metadata = {
-            stamp: dayjs(rawTime),
-            lane: channelId,
-          };
-
-          
-          // Proceed with capturing snapshots
-          this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
-            ...metadata,
-            type: "lpr",
-          });
-
-          this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
-            ...metadata,
-            type: "overview",
-          });
-        } catch (err) {
-          console.error("Error processing trigger message:", err);
+        if (!lprSnapshotConfig || !overviewSnapshotConfig) {
+          console.warn(`Snapshot configuration not found for lane ${channelId}`);
+          return;
         }
+
+        const lprSnapshotUrl = lprSnapshotConfig.snapCode;
+        const overviewSnapshotUrl = overviewSnapshotConfig.snapCode;
+
+        const metadata = {
+          stamp: dayjs(rawTime),
+          lane: channelId,
+        };
+
+        this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
+          ...metadata,
+          type: "lpr",
+        });
+
+        this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
+          ...metadata,
+          type: "overview",
+        });
       }
     } catch (err) {
       console.error("DataLogger error handling trigger message:", err);
