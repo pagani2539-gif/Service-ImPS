@@ -25,7 +25,14 @@ const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
 
 class DataLogger {
-  constructor(dataWsUrl, triggerWsUrl,reconnectInterval, config, vehicleClasses, singleTires) {
+  constructor(
+    dataWsUrl,
+    triggerWsUrl,
+    reconnectInterval,
+    config,
+    vehicleClasses,
+    singleTires
+  ) {
     this.dataWsUrl = dataWsUrl;
     this.triggerWsUrl = triggerWsUrl;
     this.config = config;
@@ -77,9 +84,59 @@ class DataLogger {
     this.triggerWebSocket.on("open", () => {
       console.log("Trigger WebSocket connection opened");
     });
-    this.triggerWebSocket.on("message", (message) =>
-      this.handleTriggerMessage(message)
-    );
+    this.triggerWebSocket.on("message", (message) => {
+      try {
+        const rawTriggerData = JSON.parse(message);
+        const eventId = rawTriggerData["event-id"];
+        const channelId = `TH${rawTriggerData.data.ChannelId}`;
+        const rawTime = rawTriggerData.data.Time;
+
+        if (eventId !== "force-event") return;
+
+        console.log(eventId, rawTime, dayjs().format("HH:mm:ss.SSSZ"));
+        if (!channelId || !rawTime) {
+          console.warn("Missing ChannelId or Time in trigger message");
+          return;
+        }
+
+        if (rawTriggerData.data.TriggerType === "Start") {
+          const lprSnapshotConfig = this.config.capture_lpr.find(
+            (item) => item.lane === channelId
+          );
+
+          const overviewSnapshotConfig = this.config.capture_overview.find(
+            (item) => item.lane === channelId
+          );
+
+          if (!lprSnapshotConfig || !overviewSnapshotConfig) {
+            console.warn(
+              `Snapshot configuration not found for lane ${channelId}`
+            );
+            return;
+          }
+
+          const lprSnapshotUrl = lprSnapshotConfig.snapCode;
+          const overviewSnapshotUrl = overviewSnapshotConfig.snapCode;
+
+          const metadata = {
+            stamp: dayjs(rawTime),
+            lane: channelId,
+          };
+
+          this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
+            ...metadata,
+            type: "lpr",
+          });
+
+          this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
+            ...metadata,
+            type: "overview",
+          });
+        }
+      } catch (err) {
+        console.error("DataLogger error handling trigger message:", err);
+      }
+    });
     this.triggerWebSocket.on("error", (error) => {
       console.error("Trigger WebSocket error:", error);
     });
@@ -106,24 +163,31 @@ class DataLogger {
       ]);
 
       if (lprSnapshots || overviewSnapshots) {
-        const [ocrResult, overviewUploadResult, lprUploadResult] = await Promise.all([
-          lprSnapshots
-            ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
-            : Promise.resolve(null),
-          overviewSnapshots
-            ? this.overviewSnapshotManager.uploadImage(
-                overviewSnapshots.imageUrl,
-                "overview"
-              )
-            : Promise.resolve({ success: false }),
-          lprSnapshots
-            ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
-            : Promise.resolve({ success: false }),
-        ]);
+        const [ocrResult, overviewUploadResult, lprUploadResult] =
+          await Promise.all([
+            lprSnapshots
+              ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
+              : Promise.resolve(null),
+            overviewSnapshots
+              ? this.overviewSnapshotManager.uploadImage(
+                  overviewSnapshots.imageUrl,
+                  "overview"
+                )
+              : Promise.resolve({ success: false }),
+            lprSnapshots
+              ? this.lprSnapshotManager.uploadImage(
+                  lprSnapshots.imageUrl,
+                  "lpr"
+                )
+              : Promise.resolve({ success: false }),
+          ]);
 
         if (ocrResult) {
           const cropUploadResult = ocrResult.crop_path
-            ? await this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
+            ? await this.cropSnapshotManager.uploadImage(
+                ocrResult.crop_path,
+                "crop"
+              )
             : { success: false };
 
           if (lprUploadResult.success) {
@@ -151,7 +215,10 @@ class DataLogger {
         console.warn("No LPR or Overview snapshots found.");
       }
 
-      if (isBus(mappedData.licensePlate) || hasNonNumericCharacters(mappedData.licensePlate)) {
+      if (
+        isBus(mappedData.licensePlate) ||
+        hasNonNumericCharacters(mappedData.licensePlate)
+      ) {
         return;
       }
 
@@ -181,7 +248,6 @@ class DataLogger {
 
   async handleTriggerMessage(message) {
     try {
-      console.log('Received trigger message', dayjs().format('HH:mm:ss.SSSZ'));
       const rawTriggerData = JSON.parse(message);
       const eventId = rawTriggerData["event-id"];
       const channelId = `TH${rawTriggerData.data.ChannelId}`;
@@ -189,7 +255,7 @@ class DataLogger {
 
       if (eventId !== "force-event") return;
 
-      console.log(eventId, rawTime, dayjs().format('HH:mm:ss.SSSZ'));
+      console.log(eventId, rawTime, dayjs().format("HH:mm:ss.SSSZ"));
       if (!channelId || !rawTime) {
         console.warn("Missing ChannelId or Time in trigger message");
         return;
@@ -205,7 +271,9 @@ class DataLogger {
         );
 
         if (!lprSnapshotConfig || !overviewSnapshotConfig) {
-          console.warn(`Snapshot configuration not found for lane ${channelId}`);
+          console.warn(
+            `Snapshot configuration not found for lane ${channelId}`
+          );
           return;
         }
 
