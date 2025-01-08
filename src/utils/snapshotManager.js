@@ -34,7 +34,7 @@ class SnapshotManager {
       const dirPath = path.join(this.baseImagePath, subFolder, lane);
       const filePath = path.join(dirPath, filename);
   
-      fs.writeFileSync(filePath, response.data);
+      fs.writeFile(filePath, response.data);
     } catch (error) {
       
     }
