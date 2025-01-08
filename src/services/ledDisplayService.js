@@ -15,6 +15,8 @@ async function createAndSendLedDisplayImage(
     const totalHeight = 480;
     const topHeight = Math.floor(totalHeight * 0.8); // 384px
     const bottomHeight = totalHeight - topHeight; // 96px
+    // Extract only the integer part from laneNo
+    const sanitizedLaneNo = parseInt(laneNo.match(/\d+/)?.[0] || "0", 10);
 
     console.log("Overview Path:", overviewPath);
     console.log("condithion Path:", conditionImage1);
@@ -54,7 +56,7 @@ async function createAndSendLedDisplayImage(
         )}`;
         // Prepare the payload
         const payload = {
-          lane: laneNo,
+          lane: sanitizedLaneNo,
           image: imageBase64,
           holding: 9000, // Display duration in milliseconds
         };

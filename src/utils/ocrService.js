@@ -34,7 +34,7 @@ module.exports = {
           "Content-Type": "application/json",
         },
         data: requestData,
-        timeout: 5000,
+        timeout: 3000,
       });
 
       // console.log("OCR response:", response.data);
