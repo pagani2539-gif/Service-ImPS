@@ -80,27 +80,59 @@ class DataLogger extends WSController {
 
       if (lprSnapshots || overviewSnapshots) {
         // Concurrently send LPR snapshots to OCR, upload LPR image, and upload the overview image
-        const [ocrResult, overviewUploadResult, lprUploadResult] = await Promise.all([
-          lprSnapshots
-            ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
-            : Promise.resolve(null), // No OCR if no LPR snapshots
-          overviewSnapshots
-            ? this.overviewSnapshotManager.uploadImage(
-                overviewSnapshots.imageUrl,
-                "overview"
-              )
-            : Promise.resolve({ success: false }), // No upload if no overview snapshots
-          lprSnapshots
-            ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
-            : Promise.resolve({ success: false }), // No upload if no LPR snapshots
-        ]);
-      
+        const [ocrResult, overviewUploadResult, lprUploadResult] =
+          await Promise.all([
+            lprSnapshots
+              ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
+              : Promise.resolve(null), // No OCR if no LPR snapshots
+            overviewSnapshots
+              ? this.overviewSnapshotManager.uploadImage(
+                  overviewSnapshots.imageUrl,
+                  "overview"
+                )
+              : Promise.resolve({ success: false }), // No upload if no overview snapshots
+            lprSnapshots
+              ? this.lprSnapshotManager.uploadImage(
+                  lprSnapshots.imageUrl,
+                  "lpr"
+                )
+              : Promise.resolve({ success: false }), // No upload if no LPR snapshots
+          ]);
+
         // Process OCR results and perform crop uploads if OCR is not null
         if (ocrResult) {
+          // Check if the vehicle is a bus
+          if (isBus(mappedData.licensePlate)) {
+            return; // Exit early if it's a bus
+          }
+          if (hasNonNumericCharacters(mappedData.licensePlate)) {
+            return;
+          }
+          // Create and send LED display image
+          // Determine condition image based on `is_overweight`
+          const conditionImage = mappedData.is_overweight
+            ? path.join(baseLedPath, "/layout/overweight.jpg")
+            : path.join(baseLedPath, "/layout/passed.jpg");
+
+          // Create and send LED display image
+          if (overviewSnapshots) {
+            createAndSendLedDisplayImage(
+              overviewSnapshots.imageUrl,
+              conditionImage, // Dynamic condition image
+              mappedData.lane || 1, // Lane number
+              this.config.led_url,
+              path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
+              this.config.led_enabled
+            );
+          }
+
           const cropUploadResult = ocrResult.crop_path
-            ? await this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
+            ? await this.cropSnapshotManager.uploadImage(
+                ocrResult.crop_path,
+                "crop"
+              )
             : { success: false };
-      
+
           // Update OCR data with uploaded file paths
           if (lprUploadResult.success) {
             ocrResult.plate_path = lprUploadResult.data.fileUrl;
@@ -108,7 +140,7 @@ class DataLogger extends WSController {
           if (cropUploadResult.success) {
             ocrResult.crop_path = cropUploadResult.data.fileUrl;
           }
-      
+
           // Update mappedData with OCR results
           mappedData.platePath = ocrResult.plate_path;
           mappedData.licensePlate = ocrResult.license_plate;
@@ -121,7 +153,7 @@ class DataLogger extends WSController {
           }
           console.warn("OCR result is null. LPR snapshot uploaded.");
         }
-      
+
         // Update overview path if the upload was successful
         if (overviewUploadResult.success) {
           mappedData.overviewPath = overviewUploadResult.data.fileUrl;
@@ -129,39 +161,12 @@ class DataLogger extends WSController {
       } else {
         console.warn("No LPR or Overview snapshots found.");
       }
-      
-
-      // Proceed to save the data only after all uploads are confirmed
-      // Check if the vehicle is a bus
-      if (isBus(mappedData.licensePlate)) {
-        return; // Exit early if it's a bus
-      }
-      if (hasNonNumericCharacters(mappedData.licensePlate)) {
-        return;
-      }
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
 
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
-      // Create and send LED display image
-      // Determine condition image based on `is_overweight`
-      const conditionImage = mappedData.is_overweight
-        ? path.join(baseLedPath, "/layout/overweight.jpg")
-        : path.join(baseLedPath, "/layout/passed.jpg");
-
-      // Create and send LED display image
-      if (overviewSnapshots) {
-        await createAndSendLedDisplayImage(
-          overviewSnapshots.imageUrl,
-          conditionImage, // Dynamic condition image
-          mappedData.lane || 1, // Lane number
-          this.config.led_url,
-          path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
-          this.config.led_enabled
-        );
-      }
     } catch (err) {
       console.error("DataLogger error handling data message:", err);
     }
@@ -170,7 +175,7 @@ class DataLogger extends WSController {
   async handleTriggerMessage(message) {
     try {
       const rawTriggerData = JSON.parse(message);
-        // console.log("DataLogger received trigger message:", rawTriggerData);
+      // console.log("DataLogger received trigger message:", rawTriggerData);
       const eventId = rawTriggerData["event-id"];
       const channelId = `TH${rawTriggerData.data.ChannelId}`;
       const rawTime = rawTriggerData.data.Time;
@@ -209,7 +214,6 @@ class DataLogger extends WSController {
             lane: channelId,
           };
 
-          
           // Proceed with capturing snapshots
           this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
             ...metadata,
