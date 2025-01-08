@@ -121,10 +121,10 @@ module.exports = {
     if (/^\d+$/.test(licensePlate)) {
       // Check if all characters are numbers
       if (licensePlate.length === 6) {
-        return licensePlate.slice(0, 3) + "-" + licensePlate.slice(3);
+        return licensePlate.slice(0, 2) + "-" + licensePlate.slice(3);
       }
       if (licensePlate.length === 7) {
-        return licensePlate.slice(0, 4) + "-" + licensePlate.slice(4);
+        return licensePlate.slice(0, 3) + "-" + licensePlate.slice(4);
       }
     }
     return licensePlate; // Return the original string if conditions are not met
