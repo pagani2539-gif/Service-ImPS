@@ -57,10 +57,10 @@ class SnapshotManager {
         const imageUrl = filePath;
 
         // Save snapshot to the database
-        await this.pool.execute(
-          `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-          [lane, type, new Date(stamp), imageUrl]
-        );
+        // await this.pool.execute(
+        //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+        //   [lane, type, new Date(stamp), imageUrl]
+        // );
 
         // console.log(`Snapshot saved to database with URL: ${imageUrl}`);
       } else {
