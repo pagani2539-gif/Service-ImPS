@@ -310,6 +310,7 @@ function isBusByWheelbase(wheelbase, minimumWheelbase) {
 
   // Check if the wheelbase meets the minimum requirement for a bus
   if (wheelbase >= minimumWheelbase) {
+    console.log("isBusByWheelbase");
     return true; // It's a bus
   }
 
@@ -335,6 +336,7 @@ function isBusByLicensePlate(licensePlate) {
       isNaN(parseInt(licensePlateArr[0])) || // First character is not a number
       isNaN(parseInt(licensePlateArr[1]))) // Second character is not a number
   ) {
+    console.log("isBusByLicensePlate");
     return true; // It's a bus
   }
 
