@@ -48,19 +48,19 @@ class SnapshotManager {
         );
 
         // Ensure the directory exists
-        await fs.ensureDir(path.dirname(filePath));
+        // await fs.ensureDir(path.dirname(filePath));
 
         // Save the image to the file system
-        await fs.writeFile(filePath, response.data);
+        fs.writeFile(filePath, response.data);
 
         // Construct the image URL with year/month/day structure
         const imageUrl = filePath;
 
         // Save snapshot to the database
-        // await this.pool.execute(
-        //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-        //   [lane, type, new Date(stamp), imageUrl]
-        // );
+        this.pool.execute(
+          `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+          [lane, type, new Date(stamp), imageUrl]
+        );
 
         // console.log(`Snapshot saved to database with URL: ${imageUrl}`);
       } else {
