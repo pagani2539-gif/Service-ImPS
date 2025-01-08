@@ -20,7 +20,7 @@ class SnapshotManager {
   async takeSnapshot(url, metadata) {
     const { lane, type, stamp } = metadata;
 
-    const response = await axios.get(lprSnapshotUrl, {
+    const response = await axios.get(url, {
       responseType: 'arraybuffer', // Ensure binary data
       timeout: 3000
     });
