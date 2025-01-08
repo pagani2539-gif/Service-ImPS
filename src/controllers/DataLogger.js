@@ -25,7 +25,7 @@ const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
 
 class DataLogger {
-  constructor(dataWsUrl, triggerWsUrl, config, vehicleClasses, singleTires) {
+  constructor(dataWsUrl, triggerWsUrl,reconnectInterval, config, vehicleClasses, singleTires) {
     this.dataWsUrl = dataWsUrl;
     this.triggerWsUrl = triggerWsUrl;
     this.config = config;
