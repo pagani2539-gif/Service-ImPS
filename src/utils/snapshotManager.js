@@ -26,8 +26,7 @@ class SnapshotManager {
     });
 
     // Construct the image path with rawTime
-    const sanitizedTime = stamp.replace(/:/g, '-'); // Replace invalid characters in filenames
-    const filename = `${type}_${lane}_${sanitizedTime}.jpg`;
+    const filename = `${type}_${lane}_${timestamp}.jpg`;
     const dirPath = path.join(this.baseImagePath, year, month, day, lane);
     const filePath = path.join(dirPath, filename);
 
