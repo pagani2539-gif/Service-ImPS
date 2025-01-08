@@ -355,4 +355,5 @@ module.exports = {
   isBus,
   ignoreGVW,
   hasNonNumericCharacters,
+  formatLicensePlate
 };

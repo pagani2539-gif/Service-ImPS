@@ -14,6 +14,7 @@ const {
   isBus,
   ignoreGVW,
   hasNonNumericCharacters,
+  formatLicensePlate
 } = require("../utils/mappers/mapDataLogger");
 const SnapshotManager = require("../utils/snapshotManager");
 const dayjs = require("dayjs");
@@ -143,7 +144,7 @@ class DataLogger extends WSController {
 
           // Update mappedData with OCR results
           mappedData.platePath = ocrResult.plate_path;
-          mappedData.licensePlate = ocrResult.license_plate;
+          mappedData.licensePlate = formatLicensePlate(ocrResult.license_plate);
           mappedData.cropPath = ocrResult.crop_path;
           mappedData.province = ocrResult.province;
         } else {
