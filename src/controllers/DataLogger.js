@@ -103,10 +103,10 @@ class DataLogger extends WSController {
         // Process OCR results and perform crop uploads if OCR is not null
         if (ocrResult) {
           // Check if the vehicle is a bus
-          if (isBus(mappedData.licensePlate)) {
+          if (isBus(ocrResult.license_plate)) {
             return; // Exit early if it's a bus
           }
-          if (hasNonNumericCharacters(mappedData.licensePlate)) {
+          if (hasNonNumericCharacters(ocrResult.license_plate)) {
             return;
           }
           // Create and send LED display image
