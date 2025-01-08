@@ -169,7 +169,6 @@ class DataLogger extends WSController {
 
   handleTriggerMessage(message) {
     try {
-      console.log('received trigger message',dayjs().format('HH:mm:ss.SSSZ'));
       const rawTriggerData = JSON.parse(message);
         // console.log("DataLogger received trigger message:", rawTriggerData);
       const eventId = rawTriggerData["event-id"];
@@ -177,7 +176,6 @@ class DataLogger extends WSController {
       const rawTime = rawTriggerData.data.Time;
 
       if (eventId != "force-event") return;
-      console.log(eventId,rawTime,dayjs().format('HH:mm:ss.SSSZ'));
       if (!channelId || !rawTime) {
         console.warn("Missing ChanelId or Time in trigger message");
         return;
