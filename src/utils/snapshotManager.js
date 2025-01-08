@@ -3,7 +3,6 @@ const fs = require("fs-extra");
 const path = require("path");
 const dayjs = require("dayjs");
 const FormData = require("form-data"); // Import form-data
-const fetch = require("node-fetch"); 
 
 
 class SnapshotManager {
