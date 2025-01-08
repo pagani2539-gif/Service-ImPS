@@ -3,6 +3,8 @@ const fs = require("fs-extra");
 const path = require("path");
 const dayjs = require("dayjs");
 const FormData = require("form-data"); // Import form-data
+const fetch = require("node-fetch"); 
+
 
 class SnapshotManager {
   constructor(pool, config, uploadUrl, baseImagePath) {
@@ -21,64 +23,54 @@ class SnapshotManager {
     const { lane, type, stamp } = metadata;
 
     try {
-      
+      // console.log('snap ',type,dayjs().format('HH:mm:ss.SSSZ'));
       const response = await axios.get(url, {
-        responseType: 'arraybuffer', // Ensure binary data
-        timeout: 3000
+        responseType: "arraybuffer",
+        timeout: 3000,
       });
-  
-      // Construct the image path with rawTime
-      const subFolder = dayjs(stamp).format("YYYY/MM/DD/")
-      const timestamp = dayjs(stamp).format("YYYY_MM_DD_HH_mm_ss");
-      const filename = `${type}_${lane}_${timestamp}.jpg`;
-      const dirPath = path.join(this.baseImagePath, subFolder, lane);
-      const filePath = path.join(dirPath, filename);
-  
-      fs.writeFile(filePath, response.data);
-    } catch (error) {
-      
+      if (response.status === 200) {
+        // Extract year, month, and day from the timestamp
+        const date = dayjs(stamp);
+        const year = date.format("YYYY");
+        const month = date.format("MM");
+        const day = date.format("DD");
+
+        // Format timestamp and construct filename
+        const timestamp = date.format("YYYY_MM_DD_HH_mm_ss_SSS");
+        const filename = `${type}_${lane}_${timestamp}.jpg`;
+
+        // Construct file path with year/month/day structure
+        const filePath = path.join(
+          this.baseImagePath,
+          year,
+          month,
+          day,
+          lane,
+          filename
+        );
+
+        // Ensure the directory exists
+        await fs.ensureDir(path.dirname(filePath));
+
+        // Save the image to the file system
+        await fs.writeFile(filePath, response.data);
+
+        // Construct the image URL with year/month/day structure
+        const imageUrl = filePath;
+
+        // Save snapshot to the database
+        await this.pool.execute(
+          `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+          [lane, type, new Date(stamp), imageUrl]
+        );
+
+        // console.log(`Snapshot saved to database with URL: ${imageUrl}`);
+      } else {
+        throw new Error(`Failed to fetch snapshot: ${response.status}`);
+      }
+    } catch (err) {
+      console.error(`Error taking snapshot for lane ${lane}, type ${type}:`);
     }
-
-    // Download image from the URL
-    // axios
-    //   .get(url, { responseType: "arraybuffer", timeout: 3000 })
-    //   .then((response) => {
-    //     if (response.status !== 200) {
-    //       throw new Error(`Failed to download snapshot: ${lane}-${type}`);
-    //     }
-
-    //     // Prepare file and directory paths
-    //     const date = dayjs(stamp);
-    //     const year = date.format("YYYY");
-    //     const month = date.format("MM");
-    //     const day = date.format("DD");
-    //     const timestamp = date.format("YYYY_MM_DD_HH_mm_ss");
-    //     const filename = `${type}_${lane}_${timestamp}.jpg`;
-
-       
-    //     const filePath = path.join(dirPath, filename);
-    //     // fs.writeFile(filePath, response.data)
-    //     // Ensure the directory exists and write the file
-    //     return fs
-    //       .ensureDir(dirPath)
-    //       .then(() => fs.writeFile(filePath, response.data)) // Save the file
-    //       .then(() => {
-    //         // console.log(`File saved at ${filePath}`);
-    //         // Insert snapshot metadata into the database
-    //         // return this.pool.execute(
-    //         //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-    //         //   [lane, type, new Date(stamp), filePath]
-    //         // );
-    //       })
-    //       .then(() => {
-    //         console.log(`Snapshot data saved in the database: ${filePath}`);
-    //       });
-    //   })
-    //   .catch((err) => {
-    //     console.error(
-    //       `Error while capturing snapshot for lane ${lane}, type ${type}`
-    //     );
-    //   });
   }
 
   /**
@@ -91,9 +83,7 @@ class SnapshotManager {
     try {
       // Introduce delay before executing the query
       if (this.config.delay_capture_overview > 0) {
-        await new Promise((resolve) =>
-          setTimeout(resolve, this.config.delay_capture_overview)
-        );
+        await new Promise((resolve) => setTimeout(resolve, this.config.delay_capture_overview));
       }
 
       const lane = mappedData.lane;

@@ -10,7 +10,7 @@ class WSController {
     this.dataSocket = null;
     this.triggerSocket = null;
 
-    // this.initDataSocket();
+    this.initDataSocket();
     this.initTriggerSocket();
   }
 
