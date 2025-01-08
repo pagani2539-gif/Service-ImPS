@@ -17,49 +17,62 @@ class SnapshotManager {
    * @param {string} url - The snapshot URL.
    * @param {object} metadata - Metadata including `lane`, `type`, and `stamp`.
    */
-  takeSnapshot(url, metadata) {
+  async takeSnapshot(url, metadata) {
     const { lane, type, stamp } = metadata;
 
+    const response = await axios.get(lprSnapshotUrl, {
+      responseType: 'arraybuffer', // Ensure binary data
+      timeout: 3000
+    });
+
+    // Construct the image path with rawTime
+    const sanitizedTime = stamp.replace(/:/g, '-'); // Replace invalid characters in filenames
+    const filename = `${type}_${lane}_${sanitizedTime}.jpg`;
+    const dirPath = path.join(this.baseImagePath, year, month, day, lane);
+    const filePath = path.join(dirPath, filename);
+
+    fs.writeFileSync(filePath, response.data);
+
     // Download image from the URL
-    axios
-      .get(url, { responseType: "arraybuffer", timeout: 3000 })
-      .then((response) => {
-        if (response.status !== 200) {
-          throw new Error(`Failed to download snapshot: ${lane}-${type}`);
-        }
+    // axios
+    //   .get(url, { responseType: "arraybuffer", timeout: 3000 })
+    //   .then((response) => {
+    //     if (response.status !== 200) {
+    //       throw new Error(`Failed to download snapshot: ${lane}-${type}`);
+    //     }
 
-        // Prepare file and directory paths
-        const date = dayjs(stamp);
-        const year = date.format("YYYY");
-        const month = date.format("MM");
-        const day = date.format("DD");
-        const timestamp = date.format("YYYY_MM_DD_HH_mm_ss");
-        const filename = `${type}_${lane}_${timestamp}.jpg`;
+    //     // Prepare file and directory paths
+    //     const date = dayjs(stamp);
+    //     const year = date.format("YYYY");
+    //     const month = date.format("MM");
+    //     const day = date.format("DD");
+    //     const timestamp = date.format("YYYY_MM_DD_HH_mm_ss");
+    //     const filename = `${type}_${lane}_${timestamp}.jpg`;
 
-        const dirPath = path.join(this.baseImagePath, year, month, day, lane);
-        const filePath = path.join(dirPath, filename);
-        // fs.writeFile(filePath, response.data)
-        // Ensure the directory exists and write the file
-        return fs
-          .ensureDir(dirPath)
-          .then(() => fs.writeFile(filePath, response.data)) // Save the file
-          .then(() => {
-            // console.log(`File saved at ${filePath}`);
-            // Insert snapshot metadata into the database
-            // return this.pool.execute(
-            //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-            //   [lane, type, new Date(stamp), filePath]
-            // );
-          })
-          .then(() => {
-            console.log(`Snapshot data saved in the database: ${filePath}`);
-          });
-      })
-      .catch((err) => {
-        console.error(
-          `Error while capturing snapshot for lane ${lane}, type ${type}`
-        );
-      });
+       
+    //     const filePath = path.join(dirPath, filename);
+    //     // fs.writeFile(filePath, response.data)
+    //     // Ensure the directory exists and write the file
+    //     return fs
+    //       .ensureDir(dirPath)
+    //       .then(() => fs.writeFile(filePath, response.data)) // Save the file
+    //       .then(() => {
+    //         // console.log(`File saved at ${filePath}`);
+    //         // Insert snapshot metadata into the database
+    //         // return this.pool.execute(
+    //         //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+    //         //   [lane, type, new Date(stamp), filePath]
+    //         // );
+    //       })
+    //       .then(() => {
+    //         console.log(`Snapshot data saved in the database: ${filePath}`);
+    //       });
+    //   })
+    //   .catch((err) => {
+    //     console.error(
+    //       `Error while capturing snapshot for lane ${lane}, type ${type}`
+    //     );
+    //   });
   }
 
   /**
