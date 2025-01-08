@@ -324,8 +324,8 @@ function ignoreGVW(gvw,gvwIgnored) {
 function hasNonNumericCharacters(licensePlate) {
   if (!licensePlate || typeof licensePlate !== "string") return false; // Handle null or invalid input
 
-  // Check if the license plate contains any non-numeric character
-  return /\D/.test(licensePlate); // \D matches any non-digit character
+  // Check if the license plate contains any non-numeric character except dash (-)
+  return /[^0-9-]/.test(licensePlate); // Matches any character that is not a digit (0-9) or a dash (-)
 }
 
 
