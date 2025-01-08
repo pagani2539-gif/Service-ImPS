@@ -46,10 +46,10 @@ class SnapshotManager {
           .then(() => {
             // console.log(`File saved at ${filePath}`);
             // Insert snapshot metadata into the database
-            return this.pool.execute(
-              `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-              [lane, type, new Date(stamp), filePath]
-            );
+            // return this.pool.execute(
+            //   `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+            //   [lane, type, new Date(stamp), filePath]
+            // );
           })
           .then(() => {
             console.log(`Snapshot data saved in the database: ${filePath}`);
