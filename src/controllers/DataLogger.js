@@ -11,7 +11,7 @@ const {
   mapWarningFlag,
   mapErrorFlag,
   setSingleTire,
-  isBus,
+  isBusByLicensePlate,
   ignoreGVW,
   hasNonNumericCharacters,
   formatLicensePlate
@@ -102,12 +102,14 @@ class DataLogger extends WSController {
 
         // Process OCR results and perform crop uploads if OCR is not null
         if (ocrResult) {
-          // Check if the vehicle is a bus
-          if (isBus(ocrResult.license_plate)) {
-            return; // Exit early if it's a bus
-          }
-          if (hasNonNumericCharacters(ocrResult.license_plate)) {
-            return;
+          if ([1, 2].includes(mappedData.vehicleClassID)){
+            // Check if the vehicle is a bus
+            if (isBusByLicensePlate(ocrResult.license_plate)) {
+              return; // Exit early if it's a bus
+            }
+            if (hasNonNumericCharacters(ocrResult.license_plate)) {
+              return;
+            }
           }
           // Create and send LED display image
           // Determine condition image based on `is_overweight`

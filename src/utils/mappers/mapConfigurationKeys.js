@@ -33,6 +33,7 @@ function mapConfigurationKeys(config) {
       capture_lpr: config.capture_lpr || JSON.stringify([]),
       led_url: config.led_url || '',
       led_enabled: config.led_enabled || 0,
+      wheelbase_bus: config.wheelbase_bus || 0,
     };
   }
   
