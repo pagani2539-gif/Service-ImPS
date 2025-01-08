@@ -135,6 +135,11 @@ class DataLogger extends WSController {
           mappedData.province = ocrResult.province;
         } else {
           // Handle case where OCR result is null
+          if ([1, 2].includes(mappedData.vehicleClassID)) {
+           if(isBusByWheelbase(mappedData.axles[1].wheelbase,this.config.wheelbase_bus)){
+             return
+           }
+          }
           if (lprUploadResult.success) {
             mappedData.platePath = lprUploadResult.data.fileUrl;
           }
