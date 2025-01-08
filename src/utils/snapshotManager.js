@@ -25,7 +25,7 @@ class SnapshotManager {
       .get(url, { responseType: "arraybuffer", timeout: 3000 })
       .then((response) => {
         if (response.status !== 200) {
-          throw new Error(`Failed to download snapshot: ${response.status}`);
+          throw new Error(`Failed to download snapshot: ${lane}-${type}`);
         }
 
         // Prepare file and directory paths
@@ -44,7 +44,7 @@ class SnapshotManager {
           .ensureDir(dirPath)
           .then(() => fs.writeFile(filePath, response.data)) // Save the file
           .then(() => {
-            console.log(`File saved at ${filePath}`);
+            // console.log(`File saved at ${filePath}`);
             // Insert snapshot metadata into the database
             return this.pool.execute(
               `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
