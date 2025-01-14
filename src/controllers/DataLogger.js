@@ -186,7 +186,7 @@ class DataLogger extends WSController {
       const rawTriggerData = JSON.parse(message);
       // console.log("DataLogger received trigger message:", rawTriggerData);
       const eventId = rawTriggerData["event-id"];
-      const channelId = `TH${rawTriggerData.data.ChannelId}`;
+      const channelId = rawTriggerData.data.ChannelId;
       const rawTime = rawTriggerData.data.Time;
 
       if (eventId != "force-event") return;
@@ -199,12 +199,12 @@ class DataLogger extends WSController {
         try {
           // Find the LPR snapshot URL for the given channelId
           const lprSnapshotConfig = this.config.capture_lpr.find(
-            (item) => item.lane === channelId
+            (item) => item.lane == channelId
           );
 
           // Find the Overview snapshot URL for the given channelId
           const overviewSnapshotConfig = this.config.capture_overview.find(
-            (item) => item.lane === channelId
+            (item) => item.lane == channelId
           );
 
           if (!lprSnapshotConfig || !overviewSnapshotConfig) {
