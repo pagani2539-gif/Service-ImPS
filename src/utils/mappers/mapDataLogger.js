@@ -11,6 +11,7 @@ function mapWarningFlag(data) {
     [4, 10].includes(value)
   );
   data.warningFlag = arr_index_warning;
+  data.isWarningFlagged = arr_index_warning.length > 0;
   return data;
   // return arr_index_warning.map((item) => (warning[item] ? warning[item] : []));
 }
@@ -21,6 +22,7 @@ function mapErrorFlag(data) {
     .map((elm, idx) => (elm == 1 ? idx : ""))
     .filter(String);
   data.errorFlag = arr_index_error;
+  data.isErrorFlagged = arr_index_error.length > 0;
   return data;
   // return arr_index_error.map((item) => (error[item] ? error[item] : []));
 }
@@ -270,6 +272,7 @@ function mapDataLogger(rawData) {
   data.vehicleClassID = 0;
   data.errorFlags = rawData.ErrorFlag || 0;
   data.warningFlags = rawData.WarningFlag || 0;
+  
 
   return data;
 }

@@ -3,8 +3,8 @@ const pool = require("../config/db"); // Import database connection pool
 // Insert a vehicle into the Vehicles table
 async function insertVehicle(data) {
   const [result] = await pool.query(
-    `INSERT INTO vehicles (axles_count, gvw, vehicle_id, lane, left_weight, right_weight, length, speed, stamp, is_overweight, error_flags, warning_flags,vehicle_class_id,esal,overweight_percentage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO vehicles (axles_count, gvw, vehicle_id, lane, left_weight, right_weight, length, speed, stamp, is_overweight, error_flags, warning_flags,is_error_flagged,is_warning_flagged,vehicle_class_id,esal,overweight_percentage)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.axlesCount,
       data.gvw,
@@ -18,6 +18,8 @@ async function insertVehicle(data) {
       data.violation,
       data.errorFlags,
       data.warningFlags,
+      data.isErrorFlagged,
+      data.isWarningFlagged,
       data.vehicleClassID,
       data.esal,
       data.overweight_percentage,
