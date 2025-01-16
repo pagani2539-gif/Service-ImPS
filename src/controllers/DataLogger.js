@@ -214,8 +214,8 @@ class DataLogger extends WSController {
             return; // Exit if configuration is missing
           }
 
-          const lprSnapshotUrl = lprSnapshotConfig.snapCode;
-          const overviewSnapshotUrl = overviewSnapshotConfig.snapCode;
+          const lprSnapshotUrl = lprSnapshotConfig.snap_code;
+          const overviewSnapshotUrl = overviewSnapshotConfig.snap_code;
 
           // Metadata for snapshot
           const metadata = {
