@@ -44,7 +44,7 @@ class SnapshotManager {
           year,
           month,
           day,
-          lane,
+          `lane${lane}`,
           filename
         );
 
