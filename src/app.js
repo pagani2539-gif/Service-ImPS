@@ -33,7 +33,9 @@ async function initializeControllers() {
         config.controller_data_url,
         config.controller_sensor_url,
         60000, // Reconnect interval
-        config // Pass the configuration to the controller
+        config, // Pass the configuration to the controller
+        vehicleClasses,
+        singleTires
       );
     } else {
       console.warn(

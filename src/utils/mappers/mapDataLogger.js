@@ -13,7 +13,6 @@ function mapWarningFlag(data) {
   data.warningFlag = arr_index_warning;
   data.isWarningFlagged = arr_index_warning.length > 0;
   return data;
-  // return arr_index_warning.map((item) => (warning[item] ? warning[item] : []));
 }
 function mapErrorFlag(data) {
   const errorFlag = data.errorFlags;
@@ -24,7 +23,6 @@ function mapErrorFlag(data) {
   data.errorFlag = arr_index_error;
   data.isErrorFlagged = arr_index_error.length > 0;
   return data;
-  // return arr_index_error.map((item) => (error[item] ? error[item] : []));
 }
 
 // Function to classify the vehicle based on the data
