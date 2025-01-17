@@ -13,7 +13,7 @@ function mapConfigurationKeys(config) {
       controller_id: config.controller_id || 0,
       controller_data_url: config.controller_data_url || "http://default-data-url",
       controller_sensor_url: config.controller_sensor_url || "http://default-sensor-url",
-      wheel_base_group_length: config.wheel_base_group_length || 0.0,
+      wheel_base_group_length: config.wheel_base_group_length*100 || 0.0,
       flir_data_url: config.flir_data_url || "http://default-flir-url",
       flux_ip: config.flux_ip || "0.0.0.0",
       flux_video_chanel: config.flux_video_chanel || 0,

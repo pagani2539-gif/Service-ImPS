@@ -1,4 +1,8 @@
 const WSController = require("./WSController");
+const { sendToWebSocket } = require("../services/wsService");
+const {
+  createAndSendLedDisplayImage,
+} = require("../services/ledDisplayService");
 const {
   mapInterComp,
   classifyVehicle,
@@ -13,10 +17,16 @@ const {
   formatLicensePlate,
   isBusByWheelbase,
   isCrossingLaneWarning,
+  convertDataTimeToMillisecond,
 } = require("../utils/mappers/mapInterComp");
 const SnapshotManager = require("../utils/snapshotManager");
-const ocrService = require("../utils/ocrService");
 const dayjs = require("dayjs");
+const ocrService = require("../utils/ocrService");
+const pool = require("../config/db");
+const path = require("path");
+const { insertVehicleWithDetails } = require("../services/vehiclesService");
+const baseImagePath = path.join(process.cwd(), "public/snapshots");
+const baseLedPath = path.join(process.cwd(), "public/leds");
 
 class InterComp extends WSController {
   constructor(
@@ -29,15 +39,32 @@ class InterComp extends WSController {
   ) {
     super(dataWsUrl, triggerWsUrl, reconnectInterval);
     this.config = config;
-
-    this.lprSnapshotManager = new SnapshotManager(10); // For LPR snapshots
-    this.overviewSnapshotManager = new SnapshotManager(10); // For Overview snapshots
+    this.singleTires = singleTires;
+    this.vehicleClasses = vehicleClasses;
+    this.lprSnapshotManager = new SnapshotManager(
+      pool,
+      config,
+      process.env.IMAGE_LPR_UPLOAD_URL,
+      baseImagePath
+    );
+    this.cropSnapshotManager = new SnapshotManager(
+      pool,
+      config,
+      process.env.IMAGE_CROP_UPLOAD_URL,
+      baseImagePath
+    );
+    this.overviewSnapshotManager = new SnapshotManager(
+      pool,
+      config,
+      process.env.IMAGE_OVERVIEW_UPLOAD_URL,
+      baseImagePath
+    );
   }
 
   async handleDataMessage(message) {
     try {
       const rawData = JSON.parse(message);
-      const mappedData = mapInterComp(rawData, this.config);
+      let mappedData = mapInterComp(rawData, this.config);
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
@@ -160,7 +187,62 @@ class InterComp extends WSController {
   }
 
   async handleTriggerMessage(message) {
-    // Handle trigger logic here
+    try {
+      const rawTriggerData = JSON.parse(message);
+      // console.log("DataLogger received trigger message:", rawTriggerData);
+      // const eventId = rawTriggerData["event-id"];
+      const channelId = rawTriggerData.LaneNo;
+      const rawTime = rawTriggerData.TriggerTime;
+
+      // if (eventId != "force-event") return;
+      if (!channelId || !rawTime) {
+        console.warn("Missing ChanelId or Time in trigger message");
+        return;
+      }
+
+      try {
+        // Find the LPR snapshot URL for the given channelId
+        const lprSnapshotConfig = this.config.capture_lpr.find(
+          (item) => item.lane == channelId
+        );
+
+        // Find the Overview snapshot URL for the given channelId
+        const overviewSnapshotConfig = this.config.capture_overview.find(
+          (item) => item.lane == channelId
+        );
+
+        if (!lprSnapshotConfig || !overviewSnapshotConfig) {
+          console.warn(
+            `Snapshot configuration not found for lane ${channelId}`
+          );
+          return; // Exit if configuration is missing
+        }
+
+        const lprSnapshotUrl = lprSnapshotConfig.snap_code;
+        const overviewSnapshotUrl = overviewSnapshotConfig.snap_code;
+
+        // Metadata for snapshot
+        const metadata = {
+          stamp: dayjs(convertDataTimeToMillisecond(rawTime)),
+          lane: channelId,
+        };
+
+        // Proceed with capturing snapshots
+        this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
+          ...metadata,
+          type: "lpr",
+        });
+
+        this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
+          ...metadata,
+          type: "overview",
+        });
+      } catch (err) {
+        console.error("Error processing trigger message:", err);
+      }
+    } catch (err) {
+      console.error("DataLogger error handling trigger message:", err);
+    }
   }
 }
 

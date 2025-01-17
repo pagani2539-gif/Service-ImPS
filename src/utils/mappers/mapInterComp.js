@@ -393,14 +393,15 @@ function mapInterComp(rawData, config) {
     }
 
     return {
+      number:index+1,
+      speedLeft: 0,
+      speedRight: 0,
       weight: weight / divideWeight,
-      ID: null,
       wheelbase:
         (index == 0 || !rawData.AxleSpacing[index - 1]
           ? 0
           : rawData.AxleSpacing[index - 1]) * 100,
       groupID: groupId,
-      LeftRightImbalance: null,
       weightLeft:
         (rawData.ScaleAxleIdWeight[index]
           ? rawData.ScaleAxleIdWeight[index]
@@ -413,9 +414,8 @@ function mapInterComp(rawData, config) {
           : 0 + rawData.ScaleAxleIdWeight[index + rawData.AxleWeight.length * 3]
           ? rawData.ScaleAxleIdWeight[index + rawData.AxleWeight.length * 3]
           : 0) / divideWeight,
-      Velocity: null,
       dualTire: true,
-      // dualTire: data.DualTires[index]? data.DualTires[index] : false
+      // dualTire: rawData.DualTires[index]? rawData.DualTires[index] : false
     };
   });
   const wheelBase = rawData.AxleSpacing.length
@@ -432,8 +432,8 @@ function mapInterComp(rawData, config) {
   data.axlesCount = rawData.AxleWeight.length;
   data.id = rawData.id;
   data.lane = rawData.LaneNo;
-  data.leftWeight = 0;
-  data.rightWeight = 0;
+  data.leftWeight =  axles.reduce((sum, item) => sum + item.weightLeft, 0);
+  data.rightWeight = axles.reduce((sum, item) => sum + item.weightRight, 0);
 
   data.esal = 0;
 
@@ -449,7 +449,7 @@ function mapInterComp(rawData, config) {
   data.licensePlate = "";
   data.province = "";
   data.cropPath = "";
-  data.stamp = dayjs(convertDataTimeToMillisecond(rawData.TimeStamp_Start));
+  data.stamp = dayjs(convertDataTimeToMillisecond(rawData.TimeStamp_Start)).format('YYYY-MM-DD HH:mm:ss.SSS');
   data.violation = 0;
   data.WheelBase = wheelBase * 100;
   data.vehicleClassID = 0;
@@ -472,5 +472,6 @@ module.exports = {
   hasNonNumericCharacters,
   formatLicensePlate,
   isBusByWheelbase,
-  isCrossingLaneWarning
+  isCrossingLaneWarning,
+  convertDataTimeToMillisecond
 };

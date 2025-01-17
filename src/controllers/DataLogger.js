@@ -71,6 +71,8 @@ class DataLogger extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
 
+      // const lprSnapshots = await this.lprSnapshotManager.findSnapshots(mappedData, "lpr");
+      // const overviewSnapshots = await this.overviewSnapshotManager.findSnapshots(mappedData, "overview");
 
       // Use Promise.all for concurrent snapshot fetching
       const [lprSnapshots, overviewSnapshots] = await Promise.all([
@@ -184,8 +186,8 @@ class DataLogger extends WSController {
       const rawTriggerData = JSON.parse(message);
       // console.log("DataLogger received trigger message:", rawTriggerData);
       const eventId = rawTriggerData["event-id"];
-      const channelId = rawTriggerData.LaneNo;
-      const rawTime = rawTriggerData.TriggerTime;
+      const channelId = rawTriggerData.data.ChannelId;
+      const rawTime = rawTriggerData.data.Time;
 
       if (eventId != "force-event") return;
       if (!channelId || !rawTime) {
