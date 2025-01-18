@@ -1,5 +1,6 @@
 // src\app.js
 require("dotenv").config();
+const { removeAllSubfolders } = require("./services/snapshotCleanupService");
 const DataLogger = require("./controllers/DataLogger");
 const InterComp = require("./controllers/InterComp");
 const { getConfiguration } = require("./services/configurationService");
@@ -50,4 +51,8 @@ async function initializeControllers() {
   }
 }
 
-initializeControllers();
+(async () => {
+  await initializeControllers();
+  console.log("Removing all subfolders in snapshots...");
+  removeAllSubfolders(); // Call cleanup function after initialization
+})();
