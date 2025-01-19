@@ -41,7 +41,7 @@ const removeAllSubfolders = () => {
 // Schedule the task to run every midnight
 schedule.scheduleJob('0 0 * * *', () => {
   console.log('Running snapshots cleanup...');
-//   removeAllSubfolders();
+  removeAllSubfolders();
 });
 
 module.exports = { removeAllSubfolders };

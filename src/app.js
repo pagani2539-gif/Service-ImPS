@@ -54,5 +54,5 @@ async function initializeControllers() {
 (async () => {
   await initializeControllers();
   console.log("Removing all subfolders in snapshots...");
-  removeAllSubfolders(); // Call cleanup function after initialization
+  // removeAllSubfolders(); // Call cleanup function after initialization
 })();
