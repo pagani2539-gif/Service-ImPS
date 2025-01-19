@@ -5,37 +5,56 @@ const pool = require("../config/db");
 const snapshotsDir = path.join(__dirname, "../../public/snapshots");
 
 // Function to remove a directory and its contents recursively
-const removeDirectory = (dirPath) => {
+const removeDirectoryFast = (dirPath) => {
   if (fs.existsSync(dirPath)) {
-    fs.readdirSync(dirPath).forEach((file) => {
-      const currentPath = path.join(dirPath, file);
-      if (fs.lstatSync(currentPath).isDirectory()) {
-        // Recursively remove subdirectory
-        removeDirectory(currentPath);
-      } else {
-        // Remove file
-        fs.unlinkSync(currentPath);
-      }
-    });
-    // Remove the empty directory
-    fs.rmdirSync(dirPath);
-    console.log(`Deleted directory: ${dirPath}`);
+    fs.rmSync(dirPath, { recursive: true, force: true }); // Fast removal
+    console.log(`Deleted directory and its contents: ${dirPath}`);
   }
 };
 
-// Function to clean up all subfolders in the snapshots directory
-const removeAllSubfolders = async () => {
+// Function to clean up old subfolders in the snapshots directory
+const removeOldFolders = async () => {
+  const currentDate = new Date();
+
   if (fs.existsSync(snapshotsDir)) {
-    fs.readdirSync(snapshotsDir).forEach((folder) => {
-      const folderPath = path.join(snapshotsDir, folder);
-      if (fs.lstatSync(folderPath).isDirectory()) {
-        removeDirectory(folderPath);
+    fs.readdirSync(snapshotsDir).forEach((yearFolder) => {
+      const yearPath = path.join(snapshotsDir, yearFolder);
+      if (fs.lstatSync(yearPath).isDirectory()) {
+        fs.readdirSync(yearPath).forEach((monthFolder) => {
+          const monthPath = path.join(yearPath, monthFolder);
+          if (fs.lstatSync(monthPath).isDirectory()) {
+            fs.readdirSync(monthPath).forEach((dayFolder) => {
+              const dayPath = path.join(monthPath, dayFolder);
+              if (fs.lstatSync(dayPath).isDirectory()) {
+                const folderDate = new Date(
+                  `${yearFolder}-${monthFolder}-${dayFolder}`
+                );
+
+                // Check if folder date is older than current date
+                if (folderDate && folderDate < currentDate) {
+                  removeDirectoryFast(dayPath); // Fast folder removal
+                }
+              }
+            });
+
+            // Remove empty month folder
+            if (fs.readdirSync(monthPath).length === 0) {
+              removeDirectoryFast(monthPath);
+            }
+          }
+        });
+
+        // Remove empty year folder
+        if (fs.readdirSync(yearPath).length === 0) {
+          removeDirectoryFast(yearPath);
+        }
       }
     });
     console.log("Snapshots cleanup completed.");
   } else {
     console.error("Snapshots directory does not exist.");
   }
+
   // Truncate the snapshot table
   try {
     console.log("Truncating snapshot table...");
@@ -49,7 +68,7 @@ const removeAllSubfolders = async () => {
 // Schedule the task to run every midnight
 schedule.scheduleJob("0 0 * * *", () => {
   console.log("Running snapshots cleanup...");
-  removeAllSubfolders();
+  removeOldFolders();
 });
 
-module.exports = { removeAllSubfolders };
+module.exports = { removeOldFolders };
