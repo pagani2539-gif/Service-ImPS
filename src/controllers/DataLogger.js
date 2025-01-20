@@ -146,7 +146,7 @@ class DataLogger extends WSController {
       console.warn("No LPR or Overview snapshots found.");
     }
 
-    return { lprSnapshots, overviewSnapshots };
+    return [lprSnapshots, overviewSnapshots];
   }
 
   async handleDataMessage(message) {
