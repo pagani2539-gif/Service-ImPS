@@ -24,8 +24,8 @@ const pool = require("../config/db");
 const path = require("path");
 const {
   insertVehicleWithDetails,
-  insertOverview,
-  insertPlates,
+  updateOverview,
+  updatePlates,
 } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
@@ -194,10 +194,10 @@ class DataLogger extends WSController {
         const [lprSnapshots, overviewSnapshots] =
           await this.findAndProcessSnapshots(mappedData);
         if (overviewSnapshots) {
-          await insertOverview(vehicleID, mappedData.overviewPath);
+          await updateOverview(vehicleID, mappedData.overviewPath);
         }
         if (lprSnapshots) {
-          await insertPlates(
+          await updatePlates(
             vehicleID,
             mappedData.licensePlate,
             mappedData.platePath,

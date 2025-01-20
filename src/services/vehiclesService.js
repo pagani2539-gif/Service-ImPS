@@ -76,6 +76,18 @@ async function insertPlates(
   );
 }
 
+async function updatePlates(vehicleID, licensePlate, platePath, province, cropPath) {
+  const result = await pool.query(
+    `UPDATE plates
+     SET license_plate = ?, plate_path = ?, province = ?, crop_path = ?
+     WHERE vehicle_id = ?`,
+    [licensePlate, platePath, province, cropPath, vehicleID]
+  );
+
+  return result.affectedRows > 0; // Return true if rows were updated, false otherwise
+}
+
+
 // Insert image data into the Images table
 async function insertOverview(vehicleID, image) {
   await pool.query(
@@ -83,6 +95,16 @@ async function insertOverview(vehicleID, image) {
          VALUES (?, ?, ?)`,
     [vehicleID, image, image]
   );
+}
+async function updateOverview(vehicleID, image) {
+  const result = await pool.query(
+    `UPDATE images 
+     SET path = ?, url = ?
+     WHERE vehicle_id = ?`,
+    [image, image, vehicleID]
+  );
+
+  return result.affectedRows > 0; // Return true if rows were updated, false otherwise
 }
 
 // Insert flags (error or warning) into the Flags table
@@ -144,4 +166,6 @@ module.exports = {
   insertVehicleWithDetails, // Export the main function for convenience
   getVehicleClasses,
   getSingleTires,
+  updateOverview,
+  updatePlates
 };
