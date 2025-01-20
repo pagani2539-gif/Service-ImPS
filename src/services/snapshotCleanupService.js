@@ -4,11 +4,19 @@ const schedule = require("node-schedule");
 const pool = require("../config/db");
 const snapshotsDir = path.join(__dirname, "../../public/snapshots");
 
-// Function to remove a directory and its contents recursively
+// Function to remove a directory and its contents recursively with error handling
 const removeDirectoryFast = (dirPath) => {
-  if (fs.existsSync(dirPath)) {
-    fs.rmSync(dirPath, { recursive: true, force: true }); // Fast removal
-    console.log(`Deleted directory and its contents: ${dirPath}`);
+  try {
+    if (fs.existsSync(dirPath)) {
+      fs.rmSync(dirPath, { recursive: true, force: true }); // Fast removal
+      console.log(`Deleted directory and its contents: ${dirPath}`);
+    }
+  } catch (err) {
+    if (err.code === "EPERM") {
+      console.error(`Permission error: Unable to delete ${dirPath}`);
+    } else {
+      console.error(`Error deleting ${dirPath}:`, err.message);
+    }
   }
 };
 
@@ -38,14 +46,14 @@ const removeOldFolders = async () => {
             });
 
             // Remove empty month folder
-            if (fs.readdirSync(monthPath).length === 0) {
+            if (fs.existsSync(monthPath) && fs.readdirSync(monthPath).length === 0) {
               removeDirectoryFast(monthPath);
             }
           }
         });
 
         // Remove empty year folder
-        if (fs.readdirSync(yearPath).length === 0) {
+        if (fs.existsSync(yearPath) && fs.readdirSync(yearPath).length === 0) {
           removeDirectoryFast(yearPath);
         }
       }
