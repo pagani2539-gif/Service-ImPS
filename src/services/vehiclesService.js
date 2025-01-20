@@ -139,7 +139,7 @@ module.exports = {
   insertAxles,
   insertAxlesAfterAllowances,
   insertPlates,
-  insertImages: insertOverview,
+  insertOverview,
   insertFlags,
   insertVehicleWithDetails, // Export the main function for convenience
   getVehicleClasses,
