@@ -189,7 +189,7 @@ class DataLogger extends WSController {
       sendToWebSocket({ vehicleID: vehicleID });
 
       if (!mappedData.overviewPath && !mappedData.platePath) {
-        console.warn("Retrying to find snapshots after 5 seconds...");
+        console.warn("Retrying to find snapshots after 5 seconds...",vehicleID);
         await new Promise((resolve) => setTimeout(resolve, 5000));
         const [lprSnapshots, overviewSnapshots] =
           await this.findAndProcessSnapshots(mappedData);
