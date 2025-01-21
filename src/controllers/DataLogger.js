@@ -78,83 +78,77 @@ class DataLogger extends WSController {
       this.overviewSnapshotManager.findSnapshots(mappedData, "overview"),
     ]);
 
-    if (lprSnapshots || overviewSnapshots) {
-      // Concurrently send LPR snapshots to OCR, upload LPR image, and upload the overview image
-      const [ocrResult, overviewUploadResult, lprUploadResult] =
-        await Promise.all([
-          lprSnapshots
-            ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
-            : Promise.resolve(null), // No OCR if no LPR snapshots
-          overviewSnapshots
-            ? this.overviewSnapshotManager.uploadImage(
-                overviewSnapshots.imageUrl,
-                "overview"
-              )
-            : Promise.resolve({ success: false }), // No upload if no overview snapshots
-          lprSnapshots
-            ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
-            : Promise.resolve({ success: false }), // No upload if no LPR snapshots
-        ]);
-
-      // Process OCR results and perform crop uploads if OCR is not null
-      if (ocrResult) {
-        if ([1, 2].includes(mappedData.vehicleClassID)) {
-          // Check if the vehicle is a bus
-          if (isBusByLicensePlate(ocrResult.license_plate)) {
-            return; // Exit early if it's a bus
-          }
-          if (hasNonNumericCharacters(ocrResult.license_plate)) {
-            return;
-          }
-        }
-
-        const cropUploadResult = ocrResult.crop_path
-          ? await this.cropSnapshotManager.uploadImage(
-              ocrResult.crop_path,
-              "crop"
-            )
-          : { success: false };
-
-        // Update OCR data with uploaded file paths
-        if (lprUploadResult.success) {
-          ocrResult.plate_path = lprUploadResult.data.fileUrl;
-        }
-        if (cropUploadResult.success) {
-          ocrResult.crop_path = cropUploadResult.data.fileUrl;
-        }
-
-        // Update mappedData with OCR results
-        mappedData.platePath = ocrResult.plate_path;
-        mappedData.licensePlate = formatLicensePlate(ocrResult.license_plate);
-        mappedData.cropPath = ocrResult.crop_path;
-        mappedData.province = ocrResult.province;
-      } else {
-        // Handle case where OCR result is null
-        if ([1, 2].includes(mappedData.vehicleClassID)) {
-          if (
-            isBusByWheelbase(
-              mappedData.axles[1].wheelbase,
-              this.config.wheelbase_bus
-            )
-          ) {
-            return;
-          }
-        }
-        if (lprUploadResult.success) {
-          mappedData.platePath = lprUploadResult.data.fileUrl;
-        }
-        console.warn("OCR result is null. LPR snapshot uploaded.");
-      }
-
-      // Update overview path if the upload was successful
-      if (overviewUploadResult.success) {
-        mappedData.overviewPath = overviewUploadResult.data.fileUrl;
-      }
-    } else {
+    if (!lprSnapshots && !overviewSnapshots) {
       console.warn("No LPR or Overview snapshots found.");
+      return false; // Exit function and indicate no further processing is needed
     }
 
-    return [lprSnapshots, overviewSnapshots];
+    const [ocrResult, overviewUploadResult, lprUploadResult] =
+      await Promise.all([
+        lprSnapshots
+          ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
+          : Promise.resolve(null),
+        overviewSnapshots
+          ? this.overviewSnapshotManager.uploadImage(
+              overviewSnapshots.imageUrl,
+              "overview"
+            )
+          : Promise.resolve({ success: false }),
+        lprSnapshots
+          ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
+          : Promise.resolve({ success: false }),
+      ]);
+
+    if (ocrResult) {
+      if ([1, 2].includes(mappedData.vehicleClassID)) {
+        if (isBusByLicensePlate(ocrResult.license_plate)) {
+          return false; // Exit if it's a bus
+        }
+        if (hasNonNumericCharacters(ocrResult.license_plate)) {
+          return false; // Exit if license plate has non-numeric characters
+        }
+      }
+
+      const cropUploadResult = ocrResult.crop_path
+        ? await this.cropSnapshotManager.uploadImage(
+            ocrResult.crop_path,
+            "crop"
+          )
+        : { success: false };
+
+      if (lprUploadResult.success) {
+        ocrResult.plate_path = lprUploadResult.data.fileUrl;
+      }
+      if (cropUploadResult.success) {
+        ocrResult.crop_path = cropUploadResult.data.fileUrl;
+      }
+
+      mappedData.platePath = ocrResult.plate_path;
+      mappedData.licensePlate = formatLicensePlate(ocrResult.license_plate);
+      mappedData.cropPath = ocrResult.crop_path;
+      mappedData.province = ocrResult.province;
+    } else {
+      if ([1, 2].includes(mappedData.vehicleClassID)) {
+        if (
+          isBusByWheelbase(
+            mappedData.axles[1].wheelbase,
+            this.config.wheelbase_bus
+          )
+        ) {
+          return false; // Exit if it's a bus based on wheelbase
+        }
+      }
+      if (lprUploadResult.success) {
+        mappedData.platePath = lprUploadResult.data.fileUrl;
+      }
+      console.warn("OCR result is null. LPR snapshot uploaded.");
+    }
+
+    if (overviewUploadResult.success) {
+      mappedData.overviewPath = overviewUploadResult.data.fileUrl;
+    }
+
+    return true; // Continue processing if all steps are successful
   }
 
   async handleDataMessage(message) {
@@ -169,9 +163,15 @@ class DataLogger extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
 
-      // Use Promise.all for concurrent snapshot fetching
-      const [lprSnapshots, overviewSnapshots] =
-        await this.findAndProcessSnapshots(mappedData);
+      // Check the result of findAndProcessSnapshots
+      const snapshotResult = await this.findAndProcessSnapshots(mappedData);
+      if (!snapshotResult) {
+        console.warn(
+          "Snapshot processing failed or exited early. Skipping further steps."
+        );
+        return; // Exit the function early
+      }
+
       // Create and send LED display image
       // Determine condition image based on `is_overweight`
       const conditionImage = mappedData.is_overweight
@@ -179,9 +179,9 @@ class DataLogger extends WSController {
         : path.join(baseLedPath, "/layout/passed.jpg");
 
       // Create and send LED display image
-      if (overviewSnapshots) {
+      if (mappedData.overviewPath) {
         createAndSendLedDisplayImage(
-          overviewSnapshots.imageUrl,
+          mappedData.overviewPath,
           conditionImage, // Dynamic condition image
           mappedData.lane || 0, // Lane number
           this.config.led_url,
@@ -197,14 +197,20 @@ class DataLogger extends WSController {
       sendToWebSocket({ vehicleID: vehicleID });
 
       if (!mappedData.overviewPath && !mappedData.platePath) {
-        console.warn("Retrying to find snapshots after 5 seconds...",vehicleID);
+        console.warn(
+          "Retrying to find snapshots after 5 seconds...",
+          vehicleID
+        );
         await new Promise((resolve) => setTimeout(resolve, 5000));
-        const [lprSnapshots, overviewSnapshots] =
-          await this.findAndProcessSnapshots(mappedData);
-        if (overviewSnapshots) {
+        const retryResult = await this.findAndProcessSnapshots(mappedData);
+        if (!retryResult) {
+          console.warn("Retry failed. Skipping.");
+          return;
+        }
+        if (mappedData.overviewPath) {
           await updateOverview(vehicleID, mappedData.overviewPath);
         }
-        if (lprSnapshots) {
+        if (mappedData.platePath) {
           await updatePlates(
             vehicleID,
             mappedData.licensePlate,
