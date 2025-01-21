@@ -24,7 +24,11 @@ const dayjs = require("dayjs");
 const ocrService = require("../utils/ocrService");
 const pool = require("../config/db");
 const path = require("path");
-const { insertVehicleWithDetails,updateOverview,updatePlates } = require("../services/vehiclesService");
+const {
+  insertVehicleWithDetails,
+  updateOverview,
+  updatePlates,
+} = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
 
@@ -185,7 +189,10 @@ class InterComp extends WSController {
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
       if (!mappedData.overviewPath && !mappedData.platePath) {
-        console.warn("Retrying to find snapshots after 5 seconds...",vehicleID);
+        console.warn(
+          "Retrying to find snapshots after 5 seconds...",
+          vehicleID
+        );
         await new Promise((resolve) => setTimeout(resolve, 5000));
         const [lprSnapshots, overviewSnapshots] =
           await this.findAndProcessSnapshots(mappedData);
