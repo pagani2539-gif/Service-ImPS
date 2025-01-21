@@ -1,3 +1,4 @@
+// src\controllers\DataLogger.js
 const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
 const {
@@ -61,6 +62,13 @@ class DataLogger extends WSController {
     );
     this.vehicleClasses = vehicleClasses;
     this.singleTires = singleTires;
+  }
+
+  async stop() {
+    console.log(`Stopping DataLogger for station: ${this.config.station_name}`);
+    // ปิด WebSocket connections และหยุด reconnect
+    this.closeSockets();
+    console.log("DataLogger stopped successfully.");
   }
 
   // ฟังก์ชันสำหรับค้นหาและประมวลผล snapshots

@@ -1,4 +1,8 @@
 const pool = require("../config/db");
+// Variable to store the current configuration hash
+// Variable to store the last known `updated_at` timestamp
+let lastUpdatedAt = null;
+
 
 /**
  * Fetch all configurations from the database.
@@ -66,4 +70,55 @@ async function getConfiguration() {
 }
 
 
-module.exports = { getConfiguration };
+
+/**
+ * Fetch the latest `updated_at` timestamp from the database.
+ * @returns {Promise<Date>} - The latest `updated_at` timestamp.
+ */
+async function getLatestUpdatedAt() {
+  try {
+    const [rows] = await pool.query(
+      `
+      SELECT updated_at
+      FROM configuration
+      ORDER BY updated_at DESC
+      LIMIT 1;
+      `
+    );
+
+    if (rows.length === 0) {
+      throw new Error("No configurations found in the database.");
+    }
+
+    return new Date(rows[0].updated_at);
+  } catch (err) {
+    console.error("Error fetching updated_at timestamp:", err);
+    throw err;
+  }
+}
+
+
+
+/**
+ * Check for configuration updates by comparing the current configuration hash with the latest configuration hash.
+ * @returns {Promise<boolean>} - Returns true if the configuration has changed, false otherwise.
+ */
+async function checkForConfigUpdates() {
+  try {
+    // Fetch the latest `updated_at` timestamp
+    const latestUpdatedAt = await getLatestUpdatedAt();
+
+    // Compare with the last known `updated_at` timestamp
+    if (!lastUpdatedAt || latestUpdatedAt > lastUpdatedAt) {
+      lastUpdatedAt = latestUpdatedAt; // Update the last known timestamp
+      return true; // Configuration has changed
+    }
+
+    return false; // No changes detected
+  } catch (err) {
+    console.error("Error checking for configuration updates:", err);
+    throw err;
+  }
+}
+
+module.exports = { getConfiguration,checkForConfigUpdates };

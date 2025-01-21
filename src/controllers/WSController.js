@@ -1,3 +1,4 @@
+// src\controllers\WSController.js
 const WebSocket = require("ws");
 const { takeSnapshot } = require("../utils/snapshot");
 
@@ -9,6 +10,8 @@ class WSController {
 
     this.dataSocket = null;
     this.triggerSocket = null;
+    this.shouldReconnect = true; // ตัวแปรควบคุม reconnect
+
 
     this.initDataSocket();
     this.initTriggerSocket();
@@ -29,7 +32,9 @@ class WSController {
 
     this.dataSocket.on("close", () => {
       console.log(new Date(), `${this.constructor.name} Data WebSocket Closed`);
-      setTimeout(() => this.initDataSocket(), this.reconnectInterval);
+      if (this.shouldReconnect) {
+        setTimeout(() => this.initDataSocket(), this.reconnectInterval);
+      }
     });
   }
 
@@ -48,7 +53,9 @@ class WSController {
 
     this.triggerSocket.on("close", () => {
       console.log(new Date(), `${this.constructor.name} Trigger WebSocket Closed`);
-      setTimeout(() => this.initTriggerSocket(), this.reconnectInterval);
+      if (this.shouldReconnect) {
+        setTimeout(() => this.initTriggerSocket(), this.reconnectInterval);
+      }
     });
   }
 
@@ -62,6 +69,19 @@ class WSController {
 
   async takeSnapshot(url, directory, filePrefix) {
     return takeSnapshot(url, directory, filePrefix);
+  }
+
+   // ฟังก์ชันสำหรับปิด WebSocket และป้องกัน reconnect
+   closeSockets() {
+    this.shouldReconnect = false; // หยุด reconnect
+    if (this.dataSocket) {
+      this.dataSocket.close();
+      this.dataSocket = null;
+    }
+    if (this.triggerSocket) {
+      this.triggerSocket.close();
+      this.triggerSocket = null;
+    }
   }
 }
 

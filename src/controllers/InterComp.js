@@ -64,7 +64,12 @@ class InterComp extends WSController {
       baseImagePath
     );
   }
-
+  async stop() {
+    console.log(`Stopping Intercomp for station: ${this.config.station_name}`);
+    // ปิด WebSocket connections และหยุด reconnect
+    this.closeSockets();
+    console.log("Intercomp stopped successfully.");
+  }
   async findAndProcessSnapshots(mappedData) {
     const [lprSnapshots, overviewSnapshots] = await Promise.all([
       this.lprSnapshotManager.findSnapshots(mappedData, "lpr"),

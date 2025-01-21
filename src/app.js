@@ -3,14 +3,16 @@ require("dotenv").config();
 const { removeAllSubfolders } = require("./services/snapshotCleanupService");
 const DataLogger = require("./controllers/DataLogger");
 const InterComp = require("./controllers/InterComp");
-const { getConfiguration } = require("./services/configurationService");
+const { getConfiguration,checkForConfigUpdates } = require("./services/configurationService");
 const {
   getVehicleClasses,
   getSingleTires,
 } = require("./services/vehiclesService");
 const mapConfigurationKeys = require("./utils/mappers/mapConfigurationKeys");
+let currentController = null; // Store the current controller instance
+let currentConfigHash = null; // Track the hash of the current configuration
 
-async function initializeControllers() {
+async function initializeController() {
   try {
     // Fetch all configurations
     const configurations = await getConfiguration();
@@ -51,6 +53,70 @@ async function initializeControllers() {
   }
 }
 
+/**
+ * Stop the current controller and clean up resources.
+ */
+async function stopController() {
+  if (currentController && typeof currentController.stop === "function") {
+    console.log("Stopping the current controller...");
+    await currentController.stop();
+    currentController = null;
+    console.log("Current controller stopped.");
+  }
+}
+
+/**
+ * Monitor configuration changes and restart controllers if necessary.
+ */
+async function monitorConfiguration() {
+  console.log("Starting configuration monitoring...");
+
+  setInterval(async () => {
+    try {
+      const isUpdated = await checkForConfigUpdates();
+
+      if (isUpdated) {
+        console.log("Configuration change detected. Restarting controllers...");
+
+        // Stop the current controller
+        await stopController();
+
+        // Initialize a new controller
+        currentController = await initializeController();
+
+        if (currentController) {
+          console.log("New controller initialized successfully.");
+        } else {
+          console.warn("No controller initialized. Configuration may be invalid.");
+        }
+      } else {
+        console.log("No configuration changes detected.");
+      }
+    } catch (err) {
+      console.error("Error monitoring configuration updates:", err);
+    }
+  }, 5000); // Check for updates every 5 seconds
+}
+
+/**
+ * Main application entry point.
+ */
 (async () => {
-  await initializeControllers();
+  try {
+    console.log("Initializing application...");
+
+    // Initial controller setup
+    currentController = await initializeController();
+
+    if (currentController) {
+      console.log("Initial controller setup completed successfully.");
+    } else {
+      console.warn("No valid controller initialized at startup.");
+    }
+
+    // Start monitoring configuration updates
+    monitorConfiguration();
+  } catch (err) {
+    console.error("Error during application initialization:", err);
+  }
 })();
