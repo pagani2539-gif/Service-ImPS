@@ -167,9 +167,11 @@ class InterComp extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
 
-      // Check the result of findAndProcessSnapshots
-      const snapshotResult = await this.findAndProcessSnapshots(mappedData);
-      if (!snapshotResult) {
+      // Use Promise.all for concurrent snapshot fetching
+      const { continueProcessing, lprSnapshots, overviewSnapshots } =
+        await this.findAndProcessSnapshots(mappedData);
+
+      if (!continueProcessing) {
         console.warn(
           "Snapshot processing failed or exited early. Skipping further steps."
         );
@@ -182,9 +184,9 @@ class InterComp extends WSController {
         : path.join(baseLedPath, "/layout/passed.jpg");
 
       // Create and send LED display image
-      if (mappedData.overviewPath) {
+      if (overviewSnapshots) {
         createAndSendLedDisplayImage(
-          mappedData.overviewPath,
+          overviewSnapshots.imageUrl,
           conditionImage, // Dynamic condition image
           mappedData.lane || 0, // Lane number
           this.config.led_url,

@@ -80,7 +80,7 @@ class DataLogger extends WSController {
 
     if (!lprSnapshots && !overviewSnapshots) {
       console.warn("No LPR or Overview snapshots found.");
-      return false; // Exit function and indicate no further processing is needed
+      return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Include snapshots in return
     }
 
     const [ocrResult, overviewUploadResult, lprUploadResult] =
@@ -102,10 +102,10 @@ class DataLogger extends WSController {
     if (ocrResult) {
       if ([1, 2].includes(mappedData.vehicleClassID)) {
         if (isBusByLicensePlate(ocrResult.license_plate)) {
-          return false; // Exit if it's a bus
+          return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
         }
         if (hasNonNumericCharacters(ocrResult.license_plate)) {
-          return false; // Exit if license plate has non-numeric characters
+          return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
         }
       }
 
@@ -135,7 +135,7 @@ class DataLogger extends WSController {
             this.config.wheelbase_bus
           )
         ) {
-          return false; // Exit if it's a bus based on wheelbase
+          return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
         }
       }
       if (lprUploadResult.success) {
@@ -148,7 +148,7 @@ class DataLogger extends WSController {
       mappedData.overviewPath = overviewUploadResult.data.fileUrl;
     }
 
-    return true; // Continue processing if all steps are successful
+    return { continueProcessing: true, lprSnapshots, overviewSnapshots }; // Include snapshots in return
   }
 
   async handleDataMessage(message) {
@@ -164,14 +164,15 @@ class DataLogger extends WSController {
       mappedData = mapErrorFlag(mappedData);
 
       // Check the result of findAndProcessSnapshots
-      const snapshotResult = await this.findAndProcessSnapshots(mappedData);
-      if (!snapshotResult) {
+      const { continueProcessing, lprSnapshots, overviewSnapshots } =
+        await this.findAndProcessSnapshots(mappedData);
+
+      if (!continueProcessing) {
         console.warn(
           "Snapshot processing failed or exited early. Skipping further steps."
         );
         return; // Exit the function early
       }
-
       // Create and send LED display image
       // Determine condition image based on `is_overweight`
       const conditionImage = mappedData.is_overweight
@@ -179,9 +180,9 @@ class DataLogger extends WSController {
         : path.join(baseLedPath, "/layout/passed.jpg");
 
       // Create and send LED display image
-      if (mappedData.overviewPath) {
+      if (overviewSnapshots) {
         createAndSendLedDisplayImage(
-          mappedData.overviewPath,
+          overviewSnapshots.imageUrl,
           conditionImage, // Dynamic condition image
           mappedData.lane || 0, // Lane number
           this.config.led_url,
