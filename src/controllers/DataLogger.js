@@ -204,7 +204,7 @@ class DataLogger extends WSController {
         );
         await new Promise((resolve) => setTimeout(resolve, 5000));
         const retryResult = await this.findAndProcessSnapshots(mappedData);
-        if (!retryResult) {
+        if (!retryResult.continueProcessing) {
           console.warn("Retry failed. Skipping.");
           return;
         }
