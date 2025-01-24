@@ -1,6 +1,29 @@
 const sharp = require("sharp");
 const axios = require("axios");
-const fs = require("fs");
+
+
+/**
+ * Sends data to the VMS server via a POST request.
+ * @param {string} url - The URL to send the POST request to.
+ * @param {object} data - The payload to include in the POST request.
+ * @returns {Promise<object>} - The response data from the POST request.
+ */
+async function sendToVMS(url, data) {
+  try {
+    const response = await axios.post(url, data, {
+      timeout: 3000, // Set timeout to 3000ms
+      headers: {
+        "Content-Type": "application/json", // Optional: Specify content type
+      },
+    });
+    console.log("POST request successful:", response.data);
+    return response.data;
+  } catch (error) {
+    console.error("Error in sendToVMS request:", error.message);
+    // throw new Error("Failed to send data to VMS");
+  }
+}
+
 
 async function createAndSendLedDisplayImage(
   overviewPath,
@@ -74,4 +97,4 @@ async function createAndSendLedDisplayImage(
   }
 }
 
-module.exports = { createAndSendLedDisplayImage };
+module.exports = { createAndSendLedDisplayImage ,sendToVMS};

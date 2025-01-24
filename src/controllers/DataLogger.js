@@ -3,6 +3,7 @@ const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
 const {
   createAndSendLedDisplayImage,
+  sendToVMS
 } = require("../services/ledDisplayService");
 const {
   mapDataLogger,
@@ -173,23 +174,14 @@ class DataLogger extends WSController {
         );
         return; // Exit the function early
       }
-      // Create and send LED display image
-      // Determine condition image based on `is_overweight`
-      const conditionImage = mappedData.is_overweight
-        ? path.join(baseLedPath, "/layout/overweight.jpg")
-        : path.join(baseLedPath, "/layout/passed.jpg");
 
-      // Create and send LED display image
-      if (overviewSnapshots) {
-        createAndSendLedDisplayImage(
-          overviewSnapshots.imageUrl,
-          conditionImage, // Dynamic condition image
-          mappedData.lane || 0, // Lane number
-          this.config.led_url,
-          path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
-          this.config.led_enabled
-        );
-      }
+      // const vmsData = { ...mappedData };
+      // // Create and send LED display image
+      // if (overviewSnapshots) {
+      //   vmsData.overviewPath = path.join(baseImagePath, overviewSnapshots.imageUrl,)
+      // }
+      sendToVMS(this.config.led_url, mappedData);
+
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
