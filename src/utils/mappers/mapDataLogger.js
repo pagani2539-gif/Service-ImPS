@@ -103,9 +103,11 @@ function setViolation(data, vehiclesClass) {
   const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Default to 1 to avoid division by zero
   if (data.gvw <= gvwMax) {
     data.violation = 0; // No violation
+    data.isOverweight = false;
     data.overweight_percentage = 0; // No overweight
   } else {
     data.violation = 1; // Violation detected
+    data.isOverweight = true;
     // Calculate overweight percentage
     data.overweight_percentage = ((data.gvw - gvwMax) / gvwMax) * 100;
   }

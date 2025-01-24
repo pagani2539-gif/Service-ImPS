@@ -1,8 +1,6 @@
 const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
-const {
-  createAndSendLedDisplayImage,
-} = require("../services/ledDisplayService");
+const { sendToVMS } = require("../services/ledDisplayService");
 const {
   mapInterComp,
   classifyVehicle,
@@ -161,7 +159,7 @@ class InterComp extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
 
-      // Use Promise.all for concurrent snapshot fetching
+      // Check the result of findAndProcessSnapshots
       const { continueProcessing, lprSnapshots, overviewSnapshots } =
         await this.findAndProcessSnapshots(mappedData);
 
@@ -171,30 +169,15 @@ class InterComp extends WSController {
         );
         return; // Exit the function early
       }
-      // Create and send LED display image
-      // Determine condition image based on `is_overweight`
-      const conditionImage = mappedData.is_overweight
-        ? path.join(baseLedPath, "/layout/overweight.jpg")
-        : path.join(baseLedPath, "/layout/passed.jpg");
 
-      // Create and send LED display image
-      if (overviewSnapshots) {
-        createAndSendLedDisplayImage(
-          overviewSnapshots.imageUrl,
-          conditionImage, // Dynamic condition image
-          mappedData.lane || 0, // Lane number
-          this.config.led_url,
-          path.join(baseLedPath, `output/output_${mappedData.lane}.jpeg`),
-          this.config.led_enabled
-        );
-      }
+      sendToVMS(this.config.led_url, mappedData);
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
 
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
-      
+
       if (!mappedData.overviewPath && !mappedData.platePath) {
         console.warn(
           "Retrying to find snapshots after 5 seconds...",

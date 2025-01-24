@@ -1,10 +1,7 @@
 // src\controllers\DataLogger.js
 const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
-const {
-  createAndSendLedDisplayImage,
-  sendToVMS
-} = require("../services/ledDisplayService");
+const { sendToVMS } = require("../services/ledDisplayService");
 const {
   mapDataLogger,
   classifyVehicle,
@@ -175,13 +172,7 @@ class DataLogger extends WSController {
         return; // Exit the function early
       }
 
-      // const vmsData = { ...mappedData };
-      // // Create and send LED display image
-      // if (overviewSnapshots) {
-      //   vmsData.overviewPath = path.join(baseImagePath, overviewSnapshots.imageUrl,)
-      // }
       sendToVMS(this.config.led_url, mappedData);
-
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
