@@ -10,7 +10,6 @@ const {
 } = require("./services/vehiclesService");
 const mapConfigurationKeys = require("./utils/mappers/mapConfigurationKeys");
 let currentController = null; // Store the current controller instance
-let currentConfigHash = null; // Track the hash of the current configuration
 
 async function initializeController() {
   try {
@@ -47,7 +46,6 @@ async function initializeController() {
       return null; // Skip unknown controllers
     }
 
-    console.log("Controllers initialized:", controllers.filter(Boolean));
   } catch (err) {
     console.error("Error initializing controllers:", err);
   }

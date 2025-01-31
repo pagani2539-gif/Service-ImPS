@@ -12,7 +12,7 @@ function initializeWebSocket() {
   });
 
   ws.on('close', () => {
-    console.log('WebSocket connection closed. Reconnecting...');
+    console.log('WebSocket connection closed. Reconnecting...',WS_URL);
     setTimeout(initializeWebSocket, 5000); // Retry connection after 5 seconds
   });
 

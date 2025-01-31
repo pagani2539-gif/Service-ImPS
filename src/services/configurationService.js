@@ -1,8 +1,16 @@
 const pool = require("../config/db");
 // Variable to store the current configuration hash
 // Variable to store the last known `updated_at` timestamp
-let lastUpdatedAt = null;
+let lastUpdatedAt;
 
+(async () => {
+  try {
+    lastUpdatedAt = await getLatestUpdatedAt();
+  } catch (error) {
+    console.error("Error initializing lastUpdatedAt:", error);
+    lastUpdatedAt = null; // ตั้งค่าเป็น null ถ้าเกิดข้อผิดพลาด
+  }
+})();
 
 /**
  * Fetch all configurations from the database.
