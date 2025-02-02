@@ -2,6 +2,7 @@
 const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
 const { sendToVMS } = require("../services/ledDisplayService");
+const {sendToTransmission} = require("../services/transmissionService");
 const {
   mapDataLogger,
   classifyVehicle,
@@ -28,6 +29,10 @@ const {
 } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
+const transmissionUrl = process.env.TRANSMISSION_URL || '';
+
+
+
 class DataLogger extends WSController {
   constructor(
     dataWsUrl,
@@ -179,6 +184,7 @@ class DataLogger extends WSController {
 
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
+      sendToTransmission(transmissionUrl,{ vehicleID: vehicleID } );
 
       if (!mappedData.overviewPath && !mappedData.platePath) {
         console.warn(
@@ -191,19 +197,23 @@ class DataLogger extends WSController {
           console.warn("Retry failed. Skipping.");
           return;
         }
-        if (mappedData.overviewPath) {
-          await updateOverview(vehicleID, mappedData.overviewPath);
+        if(mappedData.overviewPath || mappedData.platePath) {
+
+          if (mappedData.overviewPath) {
+            await updateOverview(vehicleID, mappedData.overviewPath);
+          }
+          if (mappedData.platePath) {
+            await updatePlates(
+              vehicleID,
+              mappedData.licensePlate,
+              mappedData.platePath,
+              mappedData.province,
+              mappedData.cropPath
+            );
+          }
+          sendToWebSocket({ vehicleID: vehicleID });
+          sendToTransmission(transmissionUrl,{ vehicleID: vehicleID } );
         }
-        if (mappedData.platePath) {
-          await updatePlates(
-            vehicleID,
-            mappedData.licensePlate,
-            mappedData.platePath,
-            mappedData.province,
-            mappedData.cropPath
-          );
-        }
-        sendToWebSocket({ vehicleID: vehicleID });
       }
     } catch (err) {
       console.error("DataLogger error handling data message:", err);
