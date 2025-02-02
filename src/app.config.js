@@ -1,7 +1,7 @@
 module.exports = {
     apps: [{
         name: "imps_service",
-        script: "app.js",
+        script: "src/app.js",
         instances: 1,
         exec_mode: "fork", // You can use "fork" or "cluster" mode, depending on your needs
         // Add any environment variables here if needed
