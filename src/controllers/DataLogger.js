@@ -103,7 +103,7 @@ class DataLogger extends WSController {
       ]);
 
     if (ocrResult) {
-      if ([1, 2].includes(mappedData.vehicleClassID)) {
+      if ([1, 2].includes(mappedData.vehicleClassID)) { // เฉพาะรถ 2 เพลา ที่ต้องตัดด้วยเลขทะเบียน
         if (isBusByLicensePlate(ocrResult.license_plate)) {
           return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
         }
@@ -176,6 +176,8 @@ class DataLogger extends WSController {
         );
         return; // Exit the function early
       }
+
+      
 
       sendToVMS(this.config.led_url, mappedData);
 
