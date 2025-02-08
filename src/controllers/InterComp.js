@@ -98,13 +98,12 @@ class InterComp extends WSController {
       ]);
 
     if (ocrResult) {
-      if ([1, 2].includes(mappedData.vehicleClassID)) {
-        if (isBusByLicensePlate(ocrResult.license_plate)) {
-          return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
-        }
-        if (hasNonNumericCharacters(ocrResult.license_plate)) {
-          return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
-        }
+      
+      if (isBusByLicensePlate(ocrResult.license_plate)) {
+        return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
+      }
+      if (hasNonNumericCharacters(ocrResult.license_plate)) {
+        return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
       }
 
       const cropUploadResult = ocrResult.crop_path
@@ -126,16 +125,7 @@ class InterComp extends WSController {
       mappedData.cropPath = ocrResult.crop_path;
       mappedData.province = ocrResult.province;
     } else {
-      if ([1, 2].includes(mappedData.vehicleClassID)) {
-        if (
-          isBusByWheelbase(
-            mappedData.axles[1].wheelbase,
-            this.config.wheelbase_bus
-          )
-        ) {
-          return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
-        }
-      }
+      
       if (lprUploadResult.success) {
         mappedData.platePath = lprUploadResult.data.fileUrl;
       }
@@ -170,6 +160,17 @@ class InterComp extends WSController {
           "Snapshot processing failed or exited early. Skipping further steps."
         );
         return; // Exit the function early
+      }
+
+      if (mappedData.vehicleClassID==2) { //ตัดรถประเภท 2 ที่มีความยาวเกิน
+        if (
+          isBusByWheelbase(
+            mappedData.axles[1].wheelbase,
+            this.config.wheelbase_bus
+          )
+        ) {
+          return ;
+        }
       }
 
       sendToVMS(this.config.led_url, mappedData);
