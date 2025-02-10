@@ -160,7 +160,7 @@ class DataLogger extends WSController {
 
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
-        if(isIgnoredLength(mappedData.axles[1].wheelbase,this.config.vihicle_length_ignored)){
+        if(isIgnoredLength(mappedData.axles[1].wheelbase,this.config.vehicle_length_ignored)){
           return ;
         }
       }

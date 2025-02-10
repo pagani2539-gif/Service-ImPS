@@ -34,7 +34,7 @@ function mapConfigurationKeys(config) {
       led_url: config.led_url || '',
       led_enabled: config.led_enabled || 0,
       wheelbase_bus: config.wheelbase_bus || 0,
-      vihicle_length_ignored:config.vihicle_length_ignored||0,
+      vehicle_length_ignored:config.vehicle_length_ignored||0,
     };
   }
   
