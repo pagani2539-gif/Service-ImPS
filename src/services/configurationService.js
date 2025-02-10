@@ -46,6 +46,7 @@ async function getConfiguration() {
           c.led_url,
           c.led_enabled,
           c.wheelbase_bus,
+          c.vihicle_length_ignored,
           -- Subquery for streaming_urls
           (SELECT JSON_ARRAYAGG(JSON_OBJECT('url', su.url))
           FROM streaming_urls su

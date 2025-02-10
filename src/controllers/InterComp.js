@@ -17,6 +17,7 @@ const {
   isBusByWheelbase,
   isCrossingLaneWarning,
   convertDataTimeToMillisecond,
+  isIgnoredLength,
 } = require("../utils/mappers/mapInterComp");
 const SnapshotManager = require("../utils/snapshotManager");
 const dayjs = require("dayjs");
@@ -151,6 +152,11 @@ class InterComp extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
 
+      if ([1, 2].includes(mappedData.vehicleClassID)) {
+        if(isIgnoredLength(mappedData.axles[1].wheelbase,this.config.vihicle_length_ignored)){
+          return ;
+        }
+      }
       // Check the result of findAndProcessSnapshots
       const { continueProcessing, lprSnapshots, overviewSnapshots } =
         await this.findAndProcessSnapshots(mappedData);
@@ -172,6 +178,8 @@ class InterComp extends WSController {
           return ;
         }
       }
+
+      
 
       sendToVMS(this.config.led_url, mappedData);
 

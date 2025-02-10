@@ -362,6 +362,32 @@ function ignoreGVW(gvw, gvwIgnored) {
 }
 
 /**
+ * Check if the vehicle's wheelbase is ignored based on a minimum length.
+ * @param {Number} wheelbase - The wheelbase of the vehicle in millimeters (or appropriate units).
+ * @param {Number} minLength - The minimum wheelbase length to not be ignored.
+ * @returns {Boolean} - Returns true if the wheelbase is less than the minimum length (ignored), false otherwise.
+ */
+function isIgnoredLength(wheelbase, minLength) {
+  if (
+    !wheelbase ||
+    typeof wheelbase !== "number" ||
+    !minLength ||
+    typeof minLength !== "number"
+  ) {
+    return false; // Invalid input
+  }
+
+  // Check if the wheelbase is less than the minimum length
+  if (wheelbase < minLength) {
+    console.log("isIgnoredLength");
+    return true; // Wheelbase is ignored
+  }
+
+  return false; // Wheelbase is not ignored
+}
+
+
+/**
  * Check if the license plate contains non-numeric characters.
  * @param {String} licensePlate - The license plate of the vehicle.
  * @returns {Boolean} - Returns true if the license plate contains non-numeric characters, false otherwise.
@@ -385,5 +411,6 @@ module.exports = {
   ignoreGVW,
   hasNonNumericCharacters,
   formatLicensePlate,
-  isBusByWheelbase
+  isBusByWheelbase,
+  isIgnoredLength
 };
