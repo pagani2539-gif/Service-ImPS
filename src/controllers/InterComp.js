@@ -126,7 +126,16 @@ class InterComp extends WSController {
       mappedData.cropPath = ocrResult.crop_path;
       mappedData.province = ocrResult.province;
     } else {
-      
+      if (mappedData.vehicleClassID==2) { //ตัดรถประเภท 2 ที่มีความยาวเกิน
+        if (
+          isBusByWheelbase(
+            mappedData.axles[1].wheelbase,
+            this.config.wheelbase_bus
+          )
+        ) {
+          return ;
+        }
+      }
       if (lprUploadResult.success) {
         mappedData.platePath = lprUploadResult.data.fileUrl;
       }
@@ -168,18 +177,6 @@ class InterComp extends WSController {
         return; // Exit the function early
       }
 
-      if (mappedData.vehicleClassID==2) { //ตัดรถประเภท 2 ที่มีความยาวเกิน
-        if (
-          isBusByWheelbase(
-            mappedData.axles[1].wheelbase,
-            this.config.wheelbase_bus
-          )
-        ) {
-          return ;
-        }
-      }
-
-      
 
       sendToVMS(this.config.led_url, mappedData);
 
