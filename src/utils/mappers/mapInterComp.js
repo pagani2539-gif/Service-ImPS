@@ -401,7 +401,7 @@ function mapInterComp(rawData, config) {
       index,
       groupCount,
       prevGroupId,
-      config.wheel_base_group_length
+      config.wheel_base_group_length/100
     );
     groupCount = newGroupCount;
     prevGroupId = groupId;
