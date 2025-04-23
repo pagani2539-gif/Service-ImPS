@@ -120,6 +120,8 @@ class DataLogger extends WSController {
           )
         : { success: false };
 
+      ocrResult.plate_path ='';
+      ocrResult.crop_path='';
       if (lprUploadResult.success) {
         ocrResult.plate_path = lprUploadResult.data.fileUrl;
       }
