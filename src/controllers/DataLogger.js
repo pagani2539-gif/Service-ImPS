@@ -165,7 +165,7 @@ class DataLogger extends WSController {
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
-      mappedData = setViolation(mappedData, this.vehicleClasses);
+      mappedData = setViolation(mappedData, this.vehicleClasses,exemptClassIDs = [0, 19]);
       mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);

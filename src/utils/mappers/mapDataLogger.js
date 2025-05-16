@@ -99,9 +99,9 @@ function classifyVehicle(data, config) {
 }
 
 // Function to assign violation status
-function setViolation(data, vehiclesClass) {
+function setViolation(data, vehiclesClass,exemptClassIDs = []) {
   const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Default to 1 to avoid division by zero
-  if (data.gvw <= gvwMax) {
+  if (data.gvw <= gvwMax || exemptClassIDs.includes(data.vehicleClassID) ) {
     data.violation = 0; // No violation
     data.isOverweight = false;
     data.overweight_percentage = 0; // No overweight
