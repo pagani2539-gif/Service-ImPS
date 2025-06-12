@@ -8,7 +8,7 @@ function mapWarningFlag(data) {
     .filter(String);
   arr_index_warning = arr_index_warning.filter((value) =>
     // [4, 9, 10].includes(value)
-    [4, 10].includes(value)
+    [9, 10].includes(value)
   );
   data.warningFlag = arr_index_warning;
   data.isWarningFlagged = arr_index_warning.length > 0;
