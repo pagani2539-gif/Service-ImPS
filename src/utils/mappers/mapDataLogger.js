@@ -2,7 +2,7 @@
 // Utildatay to map error flags
 function mapWarningFlag(data) {
   const warningFlag = data.warningFlags;
-  warningFlag_binary = warningFlag.toString(2).split("");
+  warningFlag_binary = warningFlag.toString(2).split("").reverse();
   arr_index_warning = warningFlag_binary
     .map((elm, idx) => (elm == 1 ? idx : ""))
     .filter(String);
