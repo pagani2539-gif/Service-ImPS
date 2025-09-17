@@ -2,7 +2,7 @@
 const WSController = require("./WSController");
 const { sendToWebSocket } = require("../services/wsService");
 const { sendToVMS } = require("../services/ledDisplayService");
-const {sendToTransmission} = require("../services/transmissionService");
+const { sendToTransmission } = require("../services/transmissionService");
 const {
   mapDataLogger,
   classifyVehicle,
@@ -31,8 +31,11 @@ const {
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
 const transmissionUrl = process.env.TRANSMISSION_URL || '';
+const threeDimensionBase = process.env.THREE_DIMENSION_BASE || '';
+const PICO_BASE = process.env.PICO_BASE || '';
+const {getSingleDualTire} = require('../services/picoService');
 
-
+const { getThreeDimension, insertThreeDimensionWithWarnings } = require('../services/threeDimensionService')
 
 class DataLogger extends WSController {
   constructor(
@@ -94,9 +97,9 @@ class DataLogger extends WSController {
           : Promise.resolve(null),
         overviewSnapshots
           ? this.overviewSnapshotManager.uploadImage(
-              overviewSnapshots.imageUrl,
-              "overview"
-            )
+            overviewSnapshots.imageUrl,
+            "overview"
+          )
           : Promise.resolve({ success: false }),
         lprSnapshots
           ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
@@ -104,7 +107,7 @@ class DataLogger extends WSController {
       ]);
 
     if (ocrResult) {
-      
+
       // ต้องตัดด้วยเลขทะเบียน
       if (isBusByLicensePlate(ocrResult.license_plate)) {
         return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
@@ -115,13 +118,13 @@ class DataLogger extends WSController {
 
       const cropUploadResult = ocrResult.crop_path
         ? await this.cropSnapshotManager.uploadImage(
-            ocrResult.crop_path,
-            "crop"
-          )
+          ocrResult.crop_path,
+          "crop"
+        )
         : { success: false };
 
-      ocrResult.plate_path ='';
-      ocrResult.crop_path='';
+      ocrResult.plate_path = '';
+      ocrResult.crop_path = '';
       if (lprUploadResult.success) {
         ocrResult.plate_path = lprUploadResult.data.fileUrl;
       }
@@ -134,17 +137,17 @@ class DataLogger extends WSController {
       mappedData.cropPath = ocrResult.crop_path;
       mappedData.province = ocrResult.province;
     } else {
-      if (mappedData.vehicleClassID==2) { //ถ้าอ่านทะเบียนไม่ได้ ตัดรถประเภท 2 ที่มีความยาวเกิน
+      if (mappedData.vehicleClassID == 2) { //ถ้าอ่านทะเบียนไม่ได้ ตัดรถประเภท 2 ที่มีความยาวเกิน
         if (
           isBusByWheelbase(
             mappedData.axles[1].wheelbase,
             this.config.wheelbase_bus
           )
         ) {
-          return ;
+          return;
         }
       }
-      
+
       if (lprUploadResult.success) {
         mappedData.platePath = lprUploadResult.data.fileUrl;
       }
@@ -161,19 +164,23 @@ class DataLogger extends WSController {
   async handleDataMessage(message) {
     try {
       const rawData = JSON.parse(message);
+      const {StartTime, StartTimeLastPresenceFall,ID } = rawData
       let mappedData = mapDataLogger(rawData);
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
-      mappedData = setViolation(mappedData, this.vehicleClasses,[0, 19]);
+      mappedData = setViolation(mappedData, this.vehicleClasses, [0, 19]);
       mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
+      let singleDualTire = null;
+      if(PICO_BASE && mappedData.lane === 1)
+        singleDualTire = getSingleDualTire(PICO_BASE,StartTime,StartTimeLastPresenceFall,ID);
 
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
-        if(isIgnoredLength(mappedData.axles[1].wheelbase,this.config.vehicle_length_ignored)){
-          return ;
+        if (isIgnoredLength(mappedData.axles[1].wheelbase, this.config.vehicle_length_ignored)) {
+          return;
         }
       }
       // Check the result of findAndProcessSnapshots
@@ -190,12 +197,20 @@ class DataLogger extends WSController {
 
       sendToVMS(this.config.led_url, mappedData);
 
+
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
 
+      //three dimension process
+      if (threeDimensionBase) {
+        const threeDimensionData = await getThreeDimension(threeDimensionBase, mappedData, vehicleID);
+        if (threeDimensionData)
+         await insertThreeDimensionWithWarnings(threeDimensionData)
+      }
+
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
-      sendToTransmission(transmissionUrl,{ vehicleID: vehicleID } );
+      sendToTransmission(transmissionUrl, { vehicleID: vehicleID });
 
       if (!mappedData.overviewPath && !mappedData.platePath) {
         console.warn(
@@ -208,7 +223,7 @@ class DataLogger extends WSController {
           console.warn("Retry failed. Skipping.");
           return;
         }
-        if(mappedData.overviewPath || mappedData.platePath) {
+        if (mappedData.overviewPath || mappedData.platePath) {
 
           if (mappedData.overviewPath) {
             await updateOverview(vehicleID, mappedData.overviewPath);
@@ -223,7 +238,7 @@ class DataLogger extends WSController {
             );
           }
           sendToWebSocket({ vehicleID: vehicleID });
-          sendToTransmission(transmissionUrl,{ vehicleID: vehicleID } );
+          sendToTransmission(transmissionUrl, { vehicleID: vehicleID });
         }
       }
     } catch (err) {
