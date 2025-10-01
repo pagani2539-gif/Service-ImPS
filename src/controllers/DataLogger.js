@@ -33,7 +33,7 @@ const baseLedPath = path.join(process.cwd(), "public/leds");
 const transmissionUrl = process.env.TRANSMISSION_URL || '';
 const threeDimensionBase = process.env.THREE_DIMENSION_BASE || '';
 const PICO_BASE = process.env.PICO_BASE || '';
-const {getSingleDualTire} = require('../services/picoService');
+const { getSingleDualTire } = require('../services/picoService');
 
 const { getThreeDimension, insertThreeDimensionWithWarnings } = require('../services/threeDimensionService')
 
@@ -164,7 +164,7 @@ class DataLogger extends WSController {
   async handleDataMessage(message) {
     try {
       const rawData = JSON.parse(message);
-      const {StartTime, StartTimeLastPresenceFall,ID } = rawData
+      const { StartTime, StartTimeLastPresenceFall, ID } = rawData
       let mappedData = mapDataLogger(rawData);
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
@@ -174,8 +174,8 @@ class DataLogger extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
       let singleDualTire = null;
-      if(PICO_BASE && mappedData.lane === 1)
-        singleDualTire = getSingleDualTire(PICO_BASE,StartTime,StartTimeLastPresenceFall,ID);
+      if (PICO_BASE && mappedData.lane === 1)
+        singleDualTire = getSingleDualTire(PICO_BASE, StartTime, StartTimeLastPresenceFall, ID);
 
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
@@ -203,10 +203,23 @@ class DataLogger extends WSController {
 
       //three dimension process
       if (threeDimensionBase) {
-        const threeDimensionData = await getThreeDimension(threeDimensionBase, mappedData, vehicleID);
-        if (threeDimensionData)
-         await insertThreeDimensionWithWarnings(threeDimensionData)
+        try {
+          const threeDimensionData = await getThreeDimension(
+            threeDimensionBase,
+            mappedData,
+            vehicleID
+          );
+
+          if (threeDimensionData) {
+            await insertThreeDimensionWithWarnings(threeDimensionData);
+          }
+        } catch (err) {
+          console.error("Error processing threeDimension:", err);
+          // คุณสามารถเลือกโยน error ต่อ หรือแค่ log ไว้
+          // throw err;
+        }
       }
+
 
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });

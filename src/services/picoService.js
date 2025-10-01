@@ -14,7 +14,7 @@ async function getSingleDualTire(PICO_BASE, start_ms, end_ms, id) {
                 end: end_ms,
                 id: id
             },
-            timeout: 10000
+            timeout: 3000
         });
 
         return response.data; // return เฉพาะ data
