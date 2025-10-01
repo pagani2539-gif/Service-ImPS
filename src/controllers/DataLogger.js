@@ -174,8 +174,21 @@ class DataLogger extends WSController {
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
       let singleDualTire = null;
-      if (PICO_BASE && mappedData.lane === 1)
-        singleDualTire = getSingleDualTire(PICO_BASE, StartTime, StartTimeLastPresenceFall, ID);
+      if (PICO_BASE && mappedData.lane === 1) {
+        try {
+          singleDualTire = getSingleDualTire(
+            PICO_BASE,
+            StartTime,
+            StartTimeLastPresenceFall,
+            ID
+          );
+        } catch (err) {
+          console.error("Error processing singleDualTire:", err);
+          // เลือกได้ว่าจะ throw ต่อ หรือแค่ log
+          // throw err;
+        }
+      }
+
 
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
