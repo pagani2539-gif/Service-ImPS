@@ -31,6 +31,9 @@ const {
 } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
+const threeDimensionBase = process.env.THREE_DIMENSION_BASE || '';
+const PICO_BASE = process.env.PICO_BASE || '';
+const { getSingleDualTire } = require('../services/picoService');
 const transmissionUrl = process.env.TRANSMISSION_URL || '';
 
 class InterComp extends WSController {
@@ -151,6 +154,7 @@ class InterComp extends WSController {
   async handleDataMessage(message) {
     try {
       const rawData = JSON.parse(message);
+      const { TimeStamp_Start:StartTime, TimeStamp_End:StartTimeLastPresenceFall, id:ID } = rawData
       let mappedData = mapInterComp(rawData, this.config);
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
@@ -160,6 +164,21 @@ class InterComp extends WSController {
       mappedData = isCrossingLaneWarning(mappedData);
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
+      let singleDualTire = null;
+      if (PICO_BASE && mappedData.lane === 1) {
+        try {
+          singleDualTire = getSingleDualTire(
+            PICO_BASE,
+            StartTime,
+            StartTimeLastPresenceFall,
+            ID
+          );
+        } catch (err) {
+          console.error("Error processing singleDualTire:", err);
+          // เลือกได้ว่าจะ throw ต่อ หรือแค่ log
+          // throw err;
+        }
+      }
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
         if(isIgnoredLength(mappedData.axles[1].wheelbase,this.config.vehicle_length_ignored)){
@@ -182,6 +201,24 @@ class InterComp extends WSController {
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
+
+      if (threeDimensionBase) {
+        try {
+          const threeDimensionData = await getThreeDimension(
+            threeDimensionBase,
+            mappedData,
+            vehicleID
+          );
+
+          if (threeDimensionData) {
+            await insertThreeDimensionWithWarnings(threeDimensionData);
+          }
+        } catch (err) {
+          console.error("Error processing threeDimension:", err);
+          // คุณสามารถเลือกโยน error ต่อ หรือแค่ log ไว้
+          // throw err;
+        }
+      }
 
       // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
