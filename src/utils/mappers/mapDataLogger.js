@@ -125,88 +125,190 @@ function setSingleTire(data, singleTires) {
 }
 
 // Function to calculate ESAL (Equivalent Single Axle Load)
-function calculateESAL(data, config, vehiclesClass) {
+// function calculateESAL(data, config, vehiclesClass) {
+//   let esalTotal = 0;
+//   const floor = config.floor_type || "flexible";
+//   const thick = config.thick || 10;
+
+//   function safeDivide(numerator, denominator) {
+//     return denominator !== 0 ? numerator / denominator : 0; // Avoid division by zero
+//   }
+
+//   if (floor === "flexible") {
+//     data.axles.forEach((element) => {
+//       const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Fallback to 1 to avoid division errors
+//       const weight = safeDivide(data.gvw * element.weight, gvwMax);
+//       const pt = 2.5;
+//       const D = thick || 10;
+//       const lx = safeDivide(weight * 2.20462262185, 1000);
+//       const l2 = element.groupID > 0 ? 2 : 1;
+
+//       const bx0 = 3.63 * Math.pow(lx + l2, 5.2);
+//       const bx1 = Math.pow(D + 1, 8.46) * Math.pow(l2, 3.52);
+//       const bx = 1 + safeDivide(bx0, bx1);
+
+//       const b18_0 = 3.63 * Math.pow(18 + 1, 5.2);
+//       const b18_1 = Math.pow(D + 1, 8.46) * Math.pow(1, 3.52);
+//       const b18 = 1 + safeDivide(b18_0, b18_1);
+
+//       const gt = safeDivide(Math.log10((4.5 - pt) / 3), 1); // Avoid invalid log operation
+//       const log_wtx_wt18 =
+//         5.9078 -
+//         4.62 * Math.log10(lx + l2) +
+//         3.28 * Math.log10(l2) +
+//         safeDivide(gt, bx) -
+//         safeDivide(gt, b18);
+
+//       const wtx_wt18 = Math.pow(10, log_wtx_wt18);
+//       const wtx = safeDivide(18, wtx_wt18);
+//       const ealf = safeDivide(18, wtx);
+
+//       if (isFinite(ealf)) {
+//         esalTotal += ealf; // Only add valid values
+//       }
+//     });
+//   }
+
+//   if (floor === "rigid") {
+//     data.axles.forEach((element) => {
+//       const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1;
+//       const weight = safeDivide(data.gvw * element.weight, gvwMax);
+//       const pt = 2.5;
+//       const D = thick || 10;
+//       const lx = safeDivide(weight * 2.20462262185, 1000);
+//       const l2 = element.groupID > 0 ? 2 : 1;
+
+//       const bx0 = 0.081 * Math.pow(lx + l2, 3.23);
+//       const bx1 = Math.pow(D + 1, 5.19) * Math.pow(l2, 3.23);
+//       const bx = 0.4 + safeDivide(bx0, bx1);
+
+//       const b18_0 = 0.081 * Math.pow(18 + 1, 3.23);
+//       const b18_1 = Math.pow(D + 1, 5.19) * Math.pow(1, 3.23);
+//       const b18 = 0.4 + safeDivide(b18_0, b18_1);
+
+//       const gt = safeDivide(Math.log10((4.2 - pt) / 2.7), 1);
+//       const log_wtx_wt18 =
+//         Math.log10(18 + 1) * 4.79 -
+//         Math.log10(lx + l2) * 4.79 +
+//         Math.log10(l2) * 4.33 +
+//         safeDivide(gt, bx) -
+//         safeDivide(gt, b18);
+
+//       const wtx_wt18 = Math.pow(10, log_wtx_wt18);
+//       const wtx = safeDivide(18, wtx_wt18);
+//       const ealf = safeDivide(18, wtx);
+
+//       if (isFinite(ealf)) {
+//         esalTotal += ealf; // Only add valid values
+//       }
+//     });
+//   }
+
+//   data.esal = esalTotal;
+//   return data;
+// }
+// คำนวณ ESAL ต่อ "การวิ่งผ่านหนึ่งครั้ง" ของรถคันหนึ่ง
+function calculateESAL(data, config = {}) {
+  // ----------------- config -----------------
+  const floor = (config.floor_type || "flexible").toLowerCase(); // "flexible" | "rigid"
+  const SN = Number(config.SN ?? 5);       // สำหรับ flexible
+  const D  = Number(config.D  ?? config.thick ?? 10); // in (นิ้ว) สำหรับ rigid
+  const Pt = Number(config.pt ?? 2.5);     // terminal serviceability
+
+  // ----------------- helpers ----------------
+  const lbPerKg = 2.20462262185;
+  const kgToKip = (kg) => (kg * lbPerKg) / 1000; // 1 kip = 1000 lb
+  const log10 = (x) => Math.log10(x);
+
+  // สร้าง "กลุ่มเพลา" จาก pattern groupID (0 = single, ตัวเลขเดียวกันที่ติดกัน = กลุ่มเดียวกัน)
+  function buildAxleGroups(axles) {
+    const groups = [];
+    let cur = null;
+    const push = () => {
+      if (!cur) return;
+      cur.nAxles = cur.axles.length;
+      cur.groupLoadKg = cur.axles.reduce((s, a) => s + a.axleLoadKg, 0);
+      groups.push(cur);
+      cur = null;
+    };
+    (axles || []).forEach((ax, idx) => {
+      const axleLoadKg =
+        typeof ax.weight === "number" && ax.weight > 0
+          ? ax.weight
+          : (ax.weightLeft || 0) + (ax.weightRight || 0);
+
+      const rec = { ...ax, axleIndex: idx, axleLoadKg };
+      if (ax.groupID > 0) {
+        if (!cur || cur.groupID !== ax.groupID || cur.isSingle) {
+          push();
+          cur = { groupID: ax.groupID, isSingle: false, axles: [] };
+        }
+        cur.axles.push(rec);
+      } else {
+        push();
+        cur = { groupID: 0, isSingle: true, axles: [rec] };
+        push();
+      }
+    });
+    push();
+    return groups;
+  }
+
+  // --------- AASHTO 1993: ตามสูตรในรูป ---------
+  function EALF_Flexible(Lx_kip, L2, SN, Pt) {
+    const Gt   = log10((4.2 - Pt) / (4.2 - 1.5));
+    const betx = 0.40 + (0.081 * Math.pow(Lx_kip + L2, 3.23)) /
+                          (Math.pow(SN + 1, 5.19) * Math.pow(L2, 3.23));
+    const bet18 = 0.40 + (0.081 * Math.pow(18 + 1, 3.23)) /
+                           (Math.pow(SN + 1, 5.19) * Math.pow(1, 3.23));
+    const log_wtx_w18 =
+      4.79 * log10(18 + 1) -
+      4.79 * log10(Lx_kip + L2) +
+      4.33 * log10(L2) +
+      (Gt / betx) -
+      (Gt / bet18);
+
+    const wtx_w18 = Math.pow(10, log_wtx_w18);
+    return 1 / wtx_w18; // EALF = W18/Wtx
+  }
+
+  function EALF_Rigid(Lx_kip, L2, D_in, Pt) {
+    const Gt   = log10((4.5 - Pt) / (4.5 - 1.5));
+    const betx = 1.00 + (3.63 * Math.pow(Lx_kip + L2, 5.20)) /
+                          (Math.pow(D_in + 1, 8.46) * Math.pow(L2, 5.52));
+    const bet18 = 1.00 + (3.63 * Math.pow(18 + 1, 5.20)) /
+                           (Math.pow(D_in + 1, 8.46) * Math.pow(1, 5.52));
+    const log_wtx_w18 =
+      4.62 * log10(18 + 1) -
+      4.62 * log10(Lx_kip + L2) +
+      3.28 * log10(L2) +
+      (Gt / betx) -
+      (Gt / bet18);
+
+    const wtx_w18 = Math.pow(10, log_wtx_w18);
+    return 1 / wtx_w18; // EALF = W18/Wtx
+  }
+
+  // --------------- main calc ----------------
   let esalTotal = 0;
-  const floor = config.floor_type || "flexible";
-  const thick = config.thick || 10;
+  const groups = buildAxleGroups(data.axles);
 
-  function safeDivide(numerator, denominator) {
-    return denominator !== 0 ? numerator / denominator : 0; // Avoid division by zero
-  }
+  groups.forEach((g) => {
+    const L2 = g.nAxles;                         // จำนวนเพลาในกลุ่ม
+    const Lx_kip = kgToKip(g.groupLoadKg);       // น้ำหนัก "กลุ่มเพลา" (kip)
+    if (!Number.isFinite(Lx_kip) || Lx_kip <= 0) return;
 
-  if (floor === "flexible") {
-    data.axles.forEach((element) => {
-      const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Fallback to 1 to avoid division errors
-      const weight = safeDivide(data.gvw * element.weight, gvwMax);
-      const pt = 2.5;
-      const D = thick || 10;
-      const lx = safeDivide(weight * 2.20462262185, 1000);
-      const l2 = element.groupID > 0 ? 2 : 1;
+    const ealf =
+      floor === "rigid"
+        ? EALF_Rigid(Lx_kip, L2, D, Pt)
+        : EALF_Flexible(Lx_kip, L2, SN, Pt);
 
-      const bx0 = 3.63 * Math.pow(lx + l2, 5.2);
-      const bx1 = Math.pow(D + 1, 8.46) * Math.pow(l2, 3.52);
-      const bx = 1 + safeDivide(bx0, bx1);
+    if (Number.isFinite(ealf)) esalTotal += ealf;
+  });
 
-      const b18_0 = 3.63 * Math.pow(18 + 1, 5.2);
-      const b18_1 = Math.pow(D + 1, 8.46) * Math.pow(1, 3.52);
-      const b18 = 1 + safeDivide(b18_0, b18_1);
-
-      const gt = safeDivide(Math.log10((4.5 - pt) / 3), 1); // Avoid invalid log operation
-      const log_wtx_wt18 =
-        5.9078 -
-        4.62 * Math.log10(lx + l2) +
-        3.28 * Math.log10(l2) +
-        safeDivide(gt, bx) -
-        safeDivide(gt, b18);
-
-      const wtx_wt18 = Math.pow(10, log_wtx_wt18);
-      const wtx = safeDivide(18, wtx_wt18);
-      const ealf = safeDivide(18, wtx);
-
-      if (isFinite(ealf)) {
-        esalTotal += ealf; // Only add valid values
-      }
-    });
-  }
-
-  if (floor === "rigid") {
-    data.axles.forEach((element) => {
-      const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1;
-      const weight = safeDivide(data.gvw * element.weight, gvwMax);
-      const pt = 2.5;
-      const D = thick || 10;
-      const lx = safeDivide(weight * 2.20462262185, 1000);
-      const l2 = element.groupID > 0 ? 2 : 1;
-
-      const bx0 = 0.081 * Math.pow(lx + l2, 3.23);
-      const bx1 = Math.pow(D + 1, 5.19) * Math.pow(l2, 3.23);
-      const bx = 0.4 + safeDivide(bx0, bx1);
-
-      const b18_0 = 0.081 * Math.pow(18 + 1, 3.23);
-      const b18_1 = Math.pow(D + 1, 5.19) * Math.pow(1, 3.23);
-      const b18 = 0.4 + safeDivide(b18_0, b18_1);
-
-      const gt = safeDivide(Math.log10((4.2 - pt) / 2.7), 1);
-      const log_wtx_wt18 =
-        Math.log10(18 + 1) * 4.79 -
-        Math.log10(lx + l2) * 4.79 +
-        Math.log10(l2) * 4.33 +
-        safeDivide(gt, bx) -
-        safeDivide(gt, b18);
-
-      const wtx_wt18 = Math.pow(10, log_wtx_wt18);
-      const wtx = safeDivide(18, wtx_wt18);
-      const ealf = safeDivide(18, wtx);
-
-      if (isFinite(ealf)) {
-        esalTotal += ealf; // Only add valid values
-      }
-    });
-  }
-
-  data.esal = esalTotal;
-  return data;
+  return { ...data, esal: esalTotal };
 }
+
 
 // Mapping logic for DataLogger
 function mapDataLogger(rawData) {
