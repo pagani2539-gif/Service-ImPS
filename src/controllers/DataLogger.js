@@ -255,7 +255,7 @@ class DataLogger extends WSController {
                 // ดึงข้อมูลคันแรกมาประมวลผลต่อตามปกติ
                 await this.processFinalVehicle(pending.data);
               }
-            }, 4000); 
+            }, 3000); 
 
             this.straddlingBuffer.set(plateKey, {
               data: mappedData,
