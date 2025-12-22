@@ -17,6 +17,7 @@ const {
   formatLicensePlate,
   isBusByWheelbase,
   isIgnoredLength,
+  mergeStraddlingVehicles
 } = require("../utils/mappers/mapDataLogger");
 const SnapshotManager = require("../utils/snapshotManager");
 const dayjs = require("dayjs");
@@ -47,6 +48,7 @@ class DataLogger extends WSController {
     singleTires
   ) {
     super(dataWsUrl, triggerWsUrl, reconnectInterval);
+    this.straddlingBuffer = new Map(); // ใช้สำหรับพักข้อมูลรถรอ Merge (Key: LicensePlate)
     this.config = config;
     // Initialize SnapshotManager for LPR and Overview
     this.lprSnapshotManager = new SnapshotManager(
@@ -173,6 +175,9 @@ class DataLogger extends WSController {
       mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
+      
+
+      
       let singleDualTire = null;
       if (PICO_BASE && mappedData.lane === 1) {
         try {
@@ -207,6 +212,60 @@ class DataLogger extends WSController {
         return; // Exit the function early
       }
 
+      // 1. ตรวจสอบเงื่อนไข Straddling (Warning 9 หรือ 10)
+      const isStraddling = mappedData.warningFlag.includes(9) || mappedData.warningFlag.includes(10);
+      console.log("------------------------",ID,"------------------------")
+      if (isStraddling) {
+        console.log("********************* straddling",ID,"*******************")
+        const plateKey = mappedData.licensePlate;
+        const currentTime = dayjs(mappedData.stamp);
+        let matchFound = false;
+
+        // ค้นหาคู่ใน Buffer
+        for (let [key, bufferedVehicle] of this.straddlingBuffer) {
+          const bufferedTime = dayjs(bufferedVehicle.data.stamp);
+          const timeDiff = Math.abs(currentTime.diff(bufferedTime, 'second'));
+
+          // ถ้าทะเบียนตรงกัน และห่างกันไม่เกิน 3 วินาที
+          if (plateKey && plateKey === key && timeDiff <= 2) {
+            console.log(`[Straddling] Match found! Merging plate: ${plateKey}`);
+            
+            clearTimeout(bufferedVehicle.timeoutHandle);
+            
+            let merged = mergeStraddlingVehicles(bufferedVehicle.data, mappedData);
+
+            if (merged) {
+              mappedData = merged;
+              this.straddlingBuffer.delete(key);
+              matchFound = true;
+              break; 
+            }
+          }
+        }
+
+        if (!matchFound) {
+          if (plateKey && plateKey !== "") {
+            console.log(`[Straddling] Waiting for partner... Plate: ${plateKey}`);
+            
+            // ตั้งเวลาถ้าไม่มีคู่มาภายใน 4 วินาที (เผื่อจาก 3 วิเล็กน้อย) ให้ทำงานต่อเอง
+            const timeoutHandle = setTimeout(async () => {
+              const pending = this.straddlingBuffer.get(plateKey);
+              if (pending) {
+                this.straddlingBuffer.delete(plateKey);
+                // ดึงข้อมูลคันแรกมาประมวลผลต่อตามปกติ
+                await this.processFinalVehicle(pending.data);
+              }
+            }, 4000); 
+
+            this.straddlingBuffer.set(plateKey, {
+              data: mappedData,
+              timeoutHandle: timeoutHandle
+            });
+            
+            return; // หยุดรอคันที่สอง
+          }
+        }
+      }
 
       sendToVMS(this.config.led_url, mappedData);
 
@@ -271,6 +330,29 @@ class DataLogger extends WSController {
       console.error("DataLogger error handling data message:", err);
     }
   }
+
+
+  // ฟังก์ชันสำหรับส่งข้อมูลที่ค้างใน Buffer ไปประมวลผลต่อจนจบ (DB, VMS, WS)
+  async processFinalVehicle(mappedData) {
+    try {
+      console.log(`[Straddling] Processing single part for ID: ${mappedData.id} (No partner found)`);
+      
+      // ส่งไปแสดงผลที่ VMS
+      sendToVMS(this.config.led_url, mappedData);
+
+      // บันทึกลง Database
+      const vehicleID = await insertVehicleWithDetails(mappedData);
+      
+      // ส่งข้อมูลผ่าน WebSocket และ Transmission
+      sendToWebSocket({ vehicleID: vehicleID });
+      sendToTransmission(transmissionUrl, { vehicleID: vehicleID });
+      
+      console.log(`[Straddling] Single part saved successfully for Vehicle ID: ${vehicleID}`);
+    } catch (err) {
+      console.error("Error in processFinalVehicle:", err);
+    }
+  }
+
 
   async handleTriggerMessage(message) {
     try {

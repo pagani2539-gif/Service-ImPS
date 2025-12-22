@@ -501,6 +501,63 @@ function hasNonNumericCharacters(licensePlate) {
   return /[^0-9]/.test(licensePlate); // Matches any character that is not a digit (0-9)
 }
 
+
+/**
+ * รวมน้ำหนักรถ 2 คันที่วิ่งคร่อมเลน
+ * @param {Object} vehicleLeft - ข้อมูลรถที่ตรวจจับได้ฝั่งซ้าย (มีน้ำหนักฝั่งซ้ายที่ถูกต้อง)
+ * @param {Object} vehicleRight - ข้อมูลรถที่ตรวจจับได้ฝั่งขวา (มีน้ำหนักฝั่งขวาที่ถูกต้อง)
+ * @returns {Object|null} - ข้อมูลรถที่รวมน้ำหนักแล้ว หรือ null ถ้าจำนวนเพลาไม่ตรงกัน
+ */
+function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
+  // ตรวจสอบเบื้องต้นว่าจำนวนเพลาเท่ากันหรือไม่
+  if (vehicleLeft.axles.length !== vehicleRight.axles.length) {
+    console.error("Cannot merge: Axle counts do not match.");
+    return null;
+  }
+
+  // ใช้โครงสร้างของ vehicleLeft เป็นฐาน (หรือเลือกคันที่สมบูรณ์กว่า)
+  let mergedData = { ...vehicleLeft };
+  
+  let totalGvw = 0;
+  let totalLeftWeight = 0;
+  let totalRightWeight = 0;
+
+  // วนลูปเพื่อรวมน้ำหนักแต่ละเพลา
+  mergedData.axles = vehicleLeft.axles.map((axleL, index) => {
+    const axleR = vehicleRight.axles[index];
+    
+    // รวมน้ำหนักซ้ายจากคันซ้าย และขวาจากคันขวา
+    const newWeightLeft = axleL.weightLeft;
+    const newWeightRight = axleR.weightRight;
+    const newAxleWeight = newWeightLeft + newWeightRight;
+
+    totalLeftWeight += newWeightLeft;
+    totalRightWeight += newWeightRight;
+    totalGvw += newAxleWeight;
+
+    return {
+      ...axleL,
+      weightLeft: newWeightLeft,
+      weightRight: newWeightRight,
+      weight: newAxleWeight,
+      // คำนวณความเร็วเฉลี่ยจากทั้งสองฝั่ง (ถ้าจำเป็น)
+      speedLeft: axleL.speedLeft,
+      speedRight: axleR.speedRight,
+    };
+  });
+
+  // อัปเดตค่าน้ำหนักรวมของรถ
+  mergedData.gvw = totalGvw;
+  mergedData.leftWeight = totalLeftWeight;
+  mergedData.rightWeight = totalRightWeight;
+  
+  // ล้างค่า Path รูปภาพหรือป้ายทะเบียนเพื่อให้ระบบไป Process ใหม่
+  mergedData.licensePlate = ""; 
+  mergedData.isStraddlingMerged = true; // flag ไว้ว่าเกิดจากการรวมข้อมูล
+
+  return mergedData;
+}
+
 module.exports = {
   mapDataLogger,
   classifyVehicle,
@@ -514,5 +571,6 @@ module.exports = {
   hasNonNumericCharacters,
   formatLicensePlate,
   isBusByWheelbase,
-  isIgnoredLength
+  isIgnoredLength,
+  mergeStraddlingVehicles
 };
