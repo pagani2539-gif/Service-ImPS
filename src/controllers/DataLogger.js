@@ -17,7 +17,8 @@ const {
   formatLicensePlate,
   isBusByWheelbase,
   isIgnoredLength,
-  mergeStraddlingVehicles
+  mergeStraddlingVehicles,
+  isReverseDirection
 } = require("../utils/mappers/mapDataLogger");
 const SnapshotManager = require("../utils/snapshotManager");
 const dayjs = require("dayjs");
@@ -168,6 +169,7 @@ class DataLogger extends WSController {
       const rawData = JSON.parse(message);
       const { StartTime, StartTimeLastPresenceFall, ID } = rawData
       let mappedData = mapDataLogger(rawData);
+      if(isReverseDirection(mappedData.direction)) return;
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) return;
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);

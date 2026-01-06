@@ -374,7 +374,7 @@ function mapDataLogger(rawData) {
   data.vehicleClassID = 0;
   data.errorFlags = rawData.ErrorFlag || 0;
   data.warningFlags = rawData.WarningFlag || 0;
-  
+  data.direction = rawData.Direction || 0
 
   return data;
 }
@@ -558,6 +558,16 @@ function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
   return mergedData;
 }
 
+/**
+ * Check if the vehicle is moving in the reverse direction.
+ * @param {Number} direction - The direction flag from the data.
+ * @returns {Boolean} - Returns true if direction is 1 (reverse), false otherwise.
+ */
+function isReverseDirection(direction) {
+  // ตรวจสอบว่าถ้า direction เท่ากับ 1 ให้ถือว่าเป็นทิศทางย้อนกลับ (True)
+  return direction === 1;
+}
+
 module.exports = {
   mapDataLogger,
   classifyVehicle,
@@ -572,5 +582,6 @@ module.exports = {
   formatLicensePlate,
   isBusByWheelbase,
   isIgnoredLength,
-  mergeStraddlingVehicles
+  mergeStraddlingVehicles,
+  isReverseDirection
 };
