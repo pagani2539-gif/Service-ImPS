@@ -476,7 +476,7 @@ function mapInterComp(rawData, config) {
   data.gvw = rawData.TotalWeight / divideWeight;
   data.axlesCount = rawData.AxleWeight.length;
   data.id = rawData.id;
-  data.lane = rawData.LaneNo;
+  data.lane = Number(rawData.LaneNo);
   data.leftWeight =  axles.reduce((sum, item) => sum + item.weightLeft, 0);
   data.rightWeight = axles.reduce((sum, item) => sum + item.weightRight, 0);
 

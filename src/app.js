@@ -1,6 +1,16 @@
 // src\app.js
 require("dotenv").config();
-const { removeAllSubfolders } = require("./services/snapshotCleanupService");
+
+// Configure Keep-Alive for Axios to prevent HTTPS timeouts and socket exhaustion under high load
+const http = require("http");
+const https = require("https");
+const axios = require("axios");
+axios.defaults.httpAgent = new http.Agent({ keepAlive: true });
+axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
+
+// Require cleanup service to start the midnight schedule job
+require("./services/snapshotCleanupService");
+
 const DataLogger = require("./controllers/DataLogger");
 const InterComp = require("./controllers/InterComp");
 const { getConfiguration,checkForConfigUpdates } = require("./services/configurationService");

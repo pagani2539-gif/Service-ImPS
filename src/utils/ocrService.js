@@ -4,28 +4,124 @@ const sharp = require("sharp");
 const fs = require("fs-extra");
 const path = require("path");
 
+/**
+ * แปลง position จาก OCR เป็น { left, top, width, height }
+ * รองรับ x1/y1/x2/y2, left/top/right/bottom, left/top/width/height
+ */
+function normalizePosition(position) {
+  if (!position || typeof position !== "object") {
+    return null;
+  }
+
+  const n = (v) => {
+    const x = Number(v);
+    return Number.isFinite(x) ? x : null;
+  };
+
+  let x1 = null;
+  let y1 = null;
+  let x2 = null;
+  let y2 = null;
+
+  if (position.x1 != null && position.x2 != null) {
+    x1 = n(position.x1);
+    y1 = n(position.y1);
+    x2 = n(position.x2);
+    y2 = n(position.y2);
+  } else if (
+    position.left != null &&
+    position.top != null &&
+    position.right != null &&
+    position.bottom != null
+  ) {
+    x1 = n(position.left);
+    y1 = n(position.top);
+    x2 = n(position.right);
+    y2 = n(position.bottom);
+  } else if (
+    position.left != null &&
+    position.top != null &&
+    position.width != null &&
+    position.height != null
+  ) {
+    x1 = n(position.left);
+    y1 = n(position.top);
+    x2 = x1 + n(position.width);
+    y2 = y1 + n(position.height);
+  } else if (
+    position.x != null &&
+    position.y != null &&
+    position.w != null &&
+    position.h != null
+  ) {
+    x1 = n(position.x);
+    y1 = n(position.y);
+    x2 = x1 + n(position.w);
+    y2 = y1 + n(position.h);
+  }
+
+  if ([x1, y1, x2, y2].some((v) => v === null)) {
+    return null;
+  }
+
+  if (x1 > x2) [x1, x2] = [x2, x1];
+  if (y1 > y2) [y1, y2] = [y2, y1];
+
+  const width = Math.floor(x2 - x1);
+  const height = Math.floor(y2 - y1);
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return {
+    left: Math.floor(x1),
+    top: Math.floor(y1),
+    width,
+    height,
+  };
+}
+
+async function clampRectToImage(imagePath, rect) {
+  const meta = await sharp(imagePath).metadata();
+  const imgW = meta.width || 0;
+  const imgH = meta.height || 0;
+
+  if (!imgW || !imgH) {
+    return null;
+  }
+
+  let { left, top, width, height } = rect;
+  left = Math.max(0, Math.min(left, imgW - 1));
+  top = Math.max(0, Math.min(top, imgH - 1));
+  width = Math.min(width, imgW - left);
+  height = Math.min(height, imgH - top);
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return { left, top, width, height };
+}
+
+function resolveImagePath(preferredPath, fallbackPath) {
+  if (preferredPath && fs.existsSync(preferredPath)) {
+    return preferredPath;
+  }
+  if (fallbackPath && fs.existsSync(fallbackPath)) {
+    return fallbackPath;
+  }
+  return null;
+}
+
 module.exports = {
-  /**
-   * Sends snapshots to the OCR service after cropping the plate based on positions.
-   * Processes the OCR response to extract license plate details and position.
-   * @param {Array} snapshots - Array of snapshots to process.
-   * @param {string} ocrEndpoint - The OCR service endpoint URL.
-   * @returns {Promise<Object>} - Processed OCR results as an object.
-   */
+  normalizePosition,
+
   async sendToOCR(snapshot, ocrEndpoint) {
     try {
-      const plates = [];
       const fullPath = snapshot.imageUrl;
       const base64Data = await this.loadImageAsBase64(fullPath);
 
-      plates.push({
-        plate_path: fullPath,
-        base64: base64Data,
-      });
-
-      const requestData = JSON.stringify({ plates: plates });
-
-      // Send to OCR service
       const response = await axios({
         method: "POST",
         maxBodyLength: Infinity,
@@ -33,82 +129,93 @@ module.exports = {
         headers: {
           "Content-Type": "application/json",
         },
-        data: requestData,
+        data: JSON.stringify({
+          plates: [{ plate_path: fullPath, base64: base64Data }],
+        }),
         timeout: 3000,
       });
 
-      // console.log("OCR response:", response.data);
-
-      // Process OCR response
-      if (response.data.plate) {
-        const ocrResult = {
-          license_plate: response.data.plate.license_plate,
-          province: response.data.plate.province,
-          position: response.data.plate.position,
-          plate_path: response.data.plate.plate_path,
-          crop_path: await this.cropImage(
-            response.data.plate.plate_path,
-            response.data.plate.position
-          ), // Crop the image based on OCR position
-        };
-
-        return ocrResult;
+      const plate = response.data?.plate;
+      if (!plate) {
+        return null;
       }
 
-      return null;
+      const license_plate = plate.license_plate;
+      if (!license_plate) {
+        return null;
+      }
+
+      let crop_path = null;
+      if (plate.position) {
+        crop_path = await this.cropImage(
+          plate.plate_path,
+          plate.position,
+          fullPath
+        );
+      }
+
+      return {
+        license_plate,
+        province: plate.province,
+        position: plate.position,
+        plate_path: plate.plate_path || fullPath,
+        crop_path,
+      };
     } catch (err) {
-      console.error("Error sending snapshots to OCR:", err.message);
+      if (err.response) {
+        console.error(
+          "Error sending snapshots to OCR:",
+          err.response.status,
+          err.message
+        );
+      } else {
+        console.error("Error sending snapshots to OCR:", err.message);
+      }
       return null;
     }
   },
 
-  /**
-   * Loads an image as a Base64 string.
-   * @param {string} imagePath - The path to the image file.
-   * @returns {Promise<string>} - Base64 encoded string of the image.
-   */
   async loadImageAsBase64(imagePath) {
-    try {
-      const buffer = await fs.readFile(imagePath);
-      return `data:image/jpeg;base64,${buffer.toString("base64")}`;
-      // return buffer.toString("base64");
-    } catch (err) {
-      console.error("Error loading image as Base64:", err);
-      throw err;
-    }
+    const buffer = await fs.readFile(imagePath);
+    return `data:image/jpeg;base64,${buffer.toString("base64")}`;
   },
 
   /**
-   * Crops an image based on the provided positions.
-   * @param {string} imagePath - The path to the image file.
-   * @param {Object} position - Object containing `x1`, `y1`, `x2`, `y2`.
-   * @returns {Promise<void>}
+   * Crops plate region. Returns cropped file path or null (does not throw).
+   * @param {string} imagePath - preferred image path
+   * @param {object} position - OCR position object
+   * @param {string} [fallbackPath] - local snapshot path if imagePath missing
    */
-  async cropImage(imagePath, position) {
+  async cropImage(imagePath, position, fallbackPath) {
     try {
-      const { x1, y1, x2, y2 } = position;
-      const width = x2 - x1;
-      const height = y2 - y1;
-
-      const croppedImagePath = imagePath.replace(".jpg", "_cropped.jpg");
-      // Ensure the image file exists
-      if (!fs.existsSync(imagePath)) {
-        throw new Error(`Image file not found: ${imagePath}`);
+      const sourcePath = resolveImagePath(imagePath, fallbackPath);
+      if (!sourcePath) {
+        console.warn("OCR crop skipped: image file not found:", imagePath);
+        return null;
       }
 
-      // Perform cropping
-      await sharp(imagePath)
-        .extract({ left: x1, top: y1, width, height })
-        .toFile(croppedImagePath);
+      const rect = normalizePosition(position);
+      if (!rect) {
+        return null;
+      }
 
-      console.log("Cropped image saved to:", croppedImagePath);
+      const clamped = await clampRectToImage(sourcePath, rect);
+      if (!clamped) {
+        console.warn(
+          "OCR crop skipped: region outside image or zero size",
+          JSON.stringify(position)
+        );
+        return null;
+      }
+
+      const croppedImagePath = sourcePath.replace(/\.jpg$/i, "_cropped.jpg");
+
+      await sharp(sourcePath).extract(clamped).toFile(croppedImagePath);
 
       return croppedImagePath;
     } catch (err) {
-      console.error("Error cropping image:", err);
-      throw err;
+      console.error("Error cropping image:", err.message);
+      return null;
     }
   },
-
-  
 };

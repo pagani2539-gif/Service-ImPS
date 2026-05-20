@@ -358,7 +358,7 @@ function mapDataLogger(rawData) {
   data.gvw = rawData.GrossWeight;
   data.axlesCount = rawData.AxlesCount;
   data.id = rawData.ID;
-  data.lane = rawData.LaneNo;
+  data.lane = Number(rawData.LaneNo);
   data.leftWeight = rawData.LeftWeight;
   data.rightWeight = rawData.RightWeight;
   data.length = rawData.VehicleLength * 100;

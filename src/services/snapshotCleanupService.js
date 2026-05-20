@@ -22,54 +22,63 @@ const removeDirectoryFast = (dirPath) => {
 
 // Function to clean up old subfolders in the snapshots directory
 const removeOldFolders = async () => {
+  const retentionDays = 3; // เก็บได้นานสุด 3 วัน
   const currentDate = new Date();
+  const todayUTC = new Date(Date.UTC(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()));
+  const thresholdDate = new Date(todayUTC.getTime() - (retentionDays - 1) * 24 * 60 * 60 * 1000);
 
   if (fs.existsSync(snapshotsDir)) {
-    fs.readdirSync(snapshotsDir).forEach((yearFolder) => {
-      const yearPath = path.join(snapshotsDir, yearFolder);
-      if (fs.lstatSync(yearPath).isDirectory()) {
-        fs.readdirSync(yearPath).forEach((monthFolder) => {
-          const monthPath = path.join(yearPath, monthFolder);
-          if (fs.lstatSync(monthPath).isDirectory()) {
-            fs.readdirSync(monthPath).forEach((dayFolder) => {
-              const dayPath = path.join(monthPath, dayFolder);
-              if (fs.lstatSync(dayPath).isDirectory()) {
-                const folderDate = new Date(
-                  `${yearFolder}-${monthFolder}-${dayFolder}`
-                );
+    const types = ["lpr", "overview"];
+    for (const type of types) {
+      const typeDir = path.join(snapshotsDir, type);
+      if (!fs.existsSync(typeDir)) continue;
 
-                // Check if folder date is older than current date
-                if (folderDate && folderDate < currentDate) {
-                  removeDirectoryFast(dayPath); // Fast folder removal
+      fs.readdirSync(typeDir).forEach((yearFolder) => {
+        const yearPath = path.join(typeDir, yearFolder);
+        if (fs.lstatSync(yearPath).isDirectory()) {
+          fs.readdirSync(yearPath).forEach((monthFolder) => {
+            const monthPath = path.join(yearPath, monthFolder);
+            if (fs.lstatSync(monthPath).isDirectory()) {
+              fs.readdirSync(monthPath).forEach((dayFolder) => {
+                const dayPath = path.join(monthPath, dayFolder);
+                if (fs.lstatSync(dayPath).isDirectory()) {
+                  const folderDate = new Date(
+                    `${yearFolder}-${monthFolder}-${dayFolder}`
+                  );
+
+                  // Check if folder date is older than 3 days
+                  if (folderDate && folderDate < thresholdDate) {
+                    removeDirectoryFast(dayPath); // Fast folder removal
+                  }
                 }
+              });
+
+              // Remove empty month folder
+              if (fs.existsSync(monthPath) && fs.readdirSync(monthPath).length === 0) {
+                removeDirectoryFast(monthPath);
               }
-            });
-
-            // Remove empty month folder
-            if (fs.existsSync(monthPath) && fs.readdirSync(monthPath).length === 0) {
-              removeDirectoryFast(monthPath);
             }
-          }
-        });
+          });
 
-        // Remove empty year folder
-        if (fs.existsSync(yearPath) && fs.readdirSync(yearPath).length === 0) {
-          removeDirectoryFast(yearPath);
+          // Remove empty year folder
+          if (fs.existsSync(yearPath) && fs.readdirSync(yearPath).length === 0) {
+            removeDirectoryFast(yearPath);
+          }
         }
-      }
-    });
+      });
+    }
     console.log("Snapshots cleanup completed.");
   } else {
     console.error("Snapshots directory does not exist.");
   }
 
-  // Truncate the snapshot table
+  // Delete records older than 3 days from the snapshots table instead of truncating
   try {
-    console.log("Truncating snapshot table...");
-    await pool.execute("TRUNCATE TABLE snapshot");
-    console.log("Snapshot table truncated successfully.");
+    console.log("Deleting old snapshot records from database...");
+    await pool.execute("DELETE FROM snapshots WHERE stamp < ?", [thresholdDate]);
+    console.log("Old snapshot records deleted successfully.");
   } catch (err) {
-    console.error("Error truncating snapshot table:", err.message);
+    console.error("Error deleting old snapshot records:", err.message);
   }
 };
 

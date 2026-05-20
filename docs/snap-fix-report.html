@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <title>รายงานการปรับปรุง LPR Snap - IMPS Service</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    body {
+      font-family: "Segoe UI", Tahoma, "Leelawadee UI", sans-serif;
+      font-size: 11pt;
+      line-height: 1.55;
+      color: #1a1a1a;
+      max-width: 180mm;
+      margin: 0 auto;
+      padding: 12mm;
+    }
+    h1 { font-size: 20pt; color: #0d47a1; border-bottom: 3px solid #0d47a1; padding-bottom: 8px; margin-top: 0; }
+    h2 { font-size: 14pt; color: #1565c0; margin-top: 22px; page-break-after: avoid; }
+    h3 { font-size: 12pt; color: #333; margin-top: 14px; }
+    .meta { color: #555; font-size: 10pt; margin-bottom: 20px; }
+    .summary-box {
+      background: #e3f2fd;
+      border-left: 5px solid #1976d2;
+      padding: 12px 16px;
+      margin: 16px 0;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10pt; }
+    th, td { border: 1px solid #bbb; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #e8eaf6; font-weight: 600; }
+    tr:nth-child(even) { background: #fafafa; }
+    code, .file { font-family: Consolas, monospace; font-size: 9.5pt; background: #f5f5f5; padding: 1px 4px; }
+    pre {
+      background: #263238;
+      color: #eceff1;
+      padding: 12px;
+      font-size: 9pt;
+      overflow-x: auto;
+      border-radius: 4px;
+      page-break-inside: avoid;
+    }
+    .before { color: #c62828; font-weight: 600; }
+    .after { color: #2e7d32; font-weight: 600; }
+    ul { margin: 8px 0; padding-left: 22px; }
+    li { margin: 4px 0; }
+    .page-break { page-break-before: always; }
+    .footer { margin-top: 30px; font-size: 9pt; color: #777; border-top: 1px solid #ddd; padding-top: 10px; }
+  </style>
+</head>
+<body>
+
+<h1>รายงานการปรับปรุงระบบ LPR Snap<br/>IMPS Service</h1>
+<p class="meta">
+  <strong>โปรเจกต์:</strong> imps_service<br/>
+  <strong>วันที่จัดทำ:</strong> 19 พฤษภาคม 2026<br/>
+  <strong>ปัญหาที่แก้:</strong> Snap ช้า และ Snap ผิดคัน (ผิดรถ / รูปซ้ำ)<br/>
+  <strong>เวอร์ชันแอป:</strong> 1.1.1
+</p>
+
+<div class="summary-box">
+  <strong>สรุปสั้น:</strong> ปรับ logic การจับภาพและจับคู่รูปกับข้อมูลรถให้เร็วขึ้นและแม่นยำขึ้น โดยไม่จำเป็นต้องติดตั้ง package ใหม่
+  สามารถ deploy และ restart service ได้ทันที ค่า <code>minimum_search</code>, <code>maximum_search</code>,
+  <code>delay_capture_overview</code> ในฐานข้อมูลยังใช้ค่าเดิมได้ (มีค่า default อยู่แล้ว)
+</div>
+
+<h2>1. ภาพรวมการทำงานของระบบ Snap</h2>
+<p>ระบบ IMPS Service ทำงานแบบ 2 ช่องทางหลัก:</p>
+<ol>
+  <li><strong>Trigger WebSocket</strong> — เมื่อรถเข้าเลน กล้องส่ง trigger มา → บริการดึงรูปจาก URL กล้อง (LPR + Overview) แล้วบันทึกลงดิสก์และตาราง <code>snapshots</code></li>
+  <li><strong>Data WebSocket</strong> — เมื่อ WIM ส่งข้อมูลน้ำหนัก/ความเร็วของรถ → ค้นหารูปที่ตรงเลนและเวลา → OCR → อัปโหลด → บันทึกลงตาราง <code>vehicles</code></li>
+</ol>
+<p>ปัญหาเกิดเมื่อขั้นตอนที่ 2 มาเร็วกว่าขั้นตอนที่ 1 เสร็จ หรือเมื่อมีรถหลายคันบนเลนเดียวกันในช่วงเวลาสั้น ๆ</p>
+
+<h2>2. ปัญหาที่พบ (ก่อนแก้ไข)</h2>
+<table>
+  <tr><th>อาการ</th><th>สาเหตุในโค้ดเดิม</th></tr>
+  <tr>
+    <td><strong>Snap ช้า</strong></td>
+    <td>
+      <ul>
+        <li>เรียก <code>takeSnapshot()</code> แบบไม่ <code>await</code> → ข้อมูลรถมาถึงก่อนรูปบันทึกเสร็จ</li>
+        <li>หารูปไม่เจอแล้วรอ retry <strong>5 วินาที</strong></li>
+        <li><code>delay_capture_overview</code> ถูกใช้กับการหา LPR ด้วย (หน่วง 1 วินาทีทุกครั้ง)</li>
+      </ul>
+    </td>
+  </tr>
+  <tr>
+    <td><strong>Snap ผิดคัน</strong></td>
+    <td>
+      <ul>
+        <li>SQL ใช้ <code>ORDER BY stamp ASC LIMIT 1</code> → เลือกรูป<strong>เก่าสุด</strong>ในช่วงเวลา ไม่ใช่รูปที่ใกล้เวลารถที่สุด</li>
+        <li>รูปที่ใช้แล้วไม่ถูก mark → รถคันถัดไปอาจได้รูปเดิม</li>
+        <li>เลขเลน (<code>lane</code>) เป็น string/number ปนกัน เช่น <code>"1"</code> กับ <code>1</code></li>
+      </ul>
+    </td>
+  </tr>
+</table>
+
+<h2>3. สิ่งที่แก้ไข — รายการไฟล์</h2>
+<table>
+  <tr><th>ไฟล์</th><th>ประเภท</th><th>รายละเอียด</th></tr>
+  <tr>
+    <td><code>src/utils/snapshotRegistry.js</code></td>
+    <td>ไฟล์ใหม่</td>
+    <td>Registry ในหน่วยความจำ จับคู่รูปตามเวลาที่ใกล้ที่สุด และป้องกันการใช้รูปซ้ำ</td>
+  </tr>
+  <tr>
+    <td><code>src/utils/snapshotManager.js</code></td>
+    <td>แก้ไขหลัก</td>
+    <td>Polling รอรูป, จับคู่เวลาใกล้สุด, ลบแถว DB หลังใช้, normalize เลน</td>
+  </tr>
+  <tr>
+    <td><code>src/controllers/DataLogger.js</code></td>
+    <td>แก้ไข</td>
+    <td>await จับภาพคู่ LPR+Overview, normalize เลนใน trigger, retry 1.5 วินาที</td>
+  </tr>
+  <tr>
+    <td><code>src/controllers/InterComp.js</code></td>
+    <td>แก้ไข</td>
+    <td>เหมือน DataLogger สำหรับ controller แบบ InterComp</td>
+  </tr>
+  <tr>
+    <td><code>src/utils/mappers/mapDataLogger.js</code></td>
+    <td>แก้ไขเล็กน้อย</td>
+    <td><code>data.lane = Number(rawData.LaneNo)</code></td>
+  </tr>
+  <tr>
+    <td><code>src/utils/mappers/mapInterComp.js</code></td>
+    <td>แก้ไขเล็กน้อย</td>
+    <td><code>data.lane = Number(rawData.LaneNo)</code></td>
+  </tr>
+  <tr>
+    <td><code>.env.example</code></td>
+    <td>เอกสาร config</td>
+    <td>เพิ่ม <code>SNAP_MATCH_POLL_MS</code>, <code>SNAP_MATCH_MAX_WAIT_MS</code></td>
+  </tr>
+</table>
+
+<div class="page-break"></div>
+
+<h2>4. รายละเอียดการแก้ไขแต่ละส่วน</h2>
+
+<h3>4.1 snapshotRegistry.js (ใหม่)</h3>
+<p>โมดูลนี้เก็บรายการรูปล่าสุดต่อเลนและประเภท (lpr / overview) ในหน่วยความจำ</p>
+<ul>
+  <li><strong>register()</strong> — บันทึกรูปหลังจับภาพสำเร็จ (lane, type, stamp, path)</li>
+  <li><strong>claimClosest()</strong> — เลือกรูปที่<strong>เวลาใกล้ <code>mappedData.stamp</code> ที่สุด</strong> ภายในช่วง minimum/maximum search และยังไม่ถูกใช้</li>
+  <li><strong>markUsed() / isUsed()</strong> — ป้องกันรถคันถัดไปเอารูปเดิม</li>
+  <li><strong>normalizeLane()</strong> — แปลงเลนเป็นตัวเลขเสมอ (แก้ปัญหา string vs number)</li>
+</ul>
+
+<h3>4.2 snapshotManager.js</h3>
+<table>
+  <tr><th>หัวข้อ</th><th class="before">ก่อน</th><th class="after">หลัง</th></tr>
+  <tr>
+    <td>การจับภาพ</td>
+    <td>บันทึก DB อย่างเดียว</td>
+    <td>register ลง memory ทันทีหลังเขียนไฟล์ + บันทึก DB, normalize lane</td>
+  </tr>
+  <tr>
+    <td>การหารูป</td>
+    <td>Query ครั้งเดียว, ORDER BY stamp ASC</td>
+    <td>Poll ทุก 150ms สูงสุด 3 วินาที; หา memory ก่อน แล้วค่อย DB</td>
+  </tr>
+  <tr>
+    <td>การเลือกรูปจาก DB</td>
+    <td>รูปเก่าสุดในช่วง</td>
+    <td><code>ORDER BY ABS(TIMESTAMPDIFF(...))</code> — รูปใกล้เวลารถที่สุด</td>
+  </tr>
+  <tr>
+    <td>delay_capture_overview</td>
+    <td>ใช้กับทุก type รวม LPR</td>
+    <td>ใช้เฉพาะ type <code>overview</code> เท่านั้น</td>
+  </tr>
+  <tr>
+    <td>หลังใช้รูป</td>
+    <td>แถวค้างใน DB</td>
+    <td>DELETE จากตาราง snapshots + mark used ใน memory</td>
+  </tr>
+</table>
+
+<h3>4.3 DataLogger.js และ InterComp.js (Trigger)</h3>
+<pre>// ก่อน — ไม่รอให้จับภาพเสร็จ
+this.lprSnapshotManager.takeSnapshot(url, metadata);
+this.overviewSnapshotManager.takeSnapshot(url2, metadata);
+
+// หลัง — รอทั้งคู่พร้อมกัน และ normalize เลน
+const lane = normalizeLane(channelId);
+await Promise.all([
+  this.lprSnapshotManager.takeSnapshot(lprUrl, { ...metadata, type: "lpr", lane }),
+  this.overviewSnapshotManager.takeSnapshot(ovUrl, { ...metadata, type: "overview", lane }),
+]);</pre>
+
+<h3>4.4 Retry เมื่อไม่มีรูปป้าย/overview</h3>
+<table>
+  <tr><th></th><th>ก่อน</th><th>หลัง</th></tr>
+  <tr><td>เวลารอ retry</td><td>5000 ms</td><td>1500 ms</td></tr>
+  <tr><td>หมายเหตุ</td><td colspan="2">การ poll ภายใน findSnapshots ช่วยลดโอกาสต้อง retry อยู่แล้ว</td></tr>
+</table>
+
+<h2>5. การตั้งค่า (ไม่บังคับต้องเปลี่ยน)</h2>
+
+<h3>5.1 ค่าในฐานข้อมูล (ตาราง configuration)</h3>
+<table>
+  <tr><th>ค่า</th><th>Default ถ้า NULL</th><th>ความหมาย</th></tr>
+  <tr><td>minimum_search</td><td>1000 ms</td><td>ค้นหารูปย้อนหลังจากเวลารถได้ไม่เกินเท่านี้</td></tr>
+  <tr><td>maximum_search</td><td>5000 ms</td><td>ค้นหารูปล่วงหน้าจากเวลารถได้ไม่เกินเท่านี้</td></tr>
+  <tr><td>delay_capture_overview</td><td>1000 ms</td><td>รอก่อนเริ่มหา overview (กล้อง overview มักช้ากว่า LPR)</td></tr>
+</table>
+<p><strong>ใช้งานได้ทันทีโดยไม่แก้ค่าเหล่านี้</strong> — จูนเมื่อยังมีอาการเฉพาะ:</p>
+<ul>
+  <li>ยังผิดคันบ่อย → ลด min/max (เช่น 500 / 2000)</li>
+  <li>หารูปไม่เจอ → เพิ่ม maximum_search</li>
+  <li>overview ว่าง/ช้า → เพิ่ม delay_capture_overview</li>
+</ul>
+
+<h3>5.2 ตัวแปรใน .env (ไม่บังคับ)</h3>
+<table>
+  <tr><th>ตัวแปร</th><th>Default</th><th>ความหมาย</th></tr>
+  <tr><td>SNAP_MATCH_POLL_MS</td><td>150</td><td>ช่วงเวลาระหว่างการลองหารูปซ้ำ</td></tr>
+  <tr><td>SNAP_MATCH_MAX_WAIT_MS</td><td>3000</td><td>รอหารูปสูงสุดกี่ ms ต่อครั้ง</td></tr>
+</table>
+
+<h2>6. Flow หลังแก้ไข (แผนภาพ)</h2>
+<pre>
+[Trigger WS] รถเข้าเลน
+      |
+      v
+await Promise.all( LPR snap + Overview snap )
+      |
+      +--> บันทึกไฟล์ + snapshotRegistry.register + INSERT DB
+      |
+[Data WS] ข้อมูลรถ (lane, stamp)
+      |
+      v
+findSnapshots (poll 150ms, max 3s)
+      |
+      +--> claimClosest จาก memory (เวลาใกล้สุด, ยังไม่ used)
+      |         หรือ query DB แบบ closest timestamp
+      |
+      v
+mark used + DELETE แถว snapshots
+      |
+      v
+OCR + Upload (Promise.all เดิม) --> บันทึก vehicles
+</pre>
+
+<h2>7. ผลที่คาดหวังหลัง Deploy</h2>
+<table>
+  <tr><th>ด้าน</th><th>ผลที่มักเห็น</th></tr>
+  <tr><td>ความเร็ว</td><td>รูปขึ้นเร็วขึ้น; ลดการรอ 5 วินาที; LPR ไม่โดนหน่วง 1 วินาทีจาก overview delay</td></tr>
+  <tr><td>ความถูกต้อง</td><td>จับคู่รูปกับรถตามเวลาใกล้สุด; รูปไม่ถูกใช้ซ้ำระหว่างคัน</td></tr>
+  <tr><td>Log</td><td>ข้อความ "Retrying ... after 5 seconds" น้อยลง หรือเป็น 1.5 วินาที</td></tr>
+</table>
+
+<h2>8. วิธี Deploy</h2>
+<ol>
+  <li>ดึงโค้ดล่าสุดไปที่เซิร์ฟเวอร์</li>
+  <li>Restart service: <code>npm run prod</code> หรือ <code>pm2 restart</code> ตามที่ใช้อยู่</li>
+  <li>(ถ้าต้องการ) เพิ่มใน <code>.env</code>: SNAP_MATCH_POLL_MS, SNAP_MATCH_MAX_WAIT_MS</li>
+  <li>ทดสอบรถจริง 1–2 เลน สังเกตเวลาและความตรงของป้ายทะเบียน</li>
+</ol>
+
+<h2>9. ข้อจำกัด / สิ่งที่ยังต้องเช็คด้วยมือ</h2>
+<ul>
+  <li><strong>Mapping กล้อง:</strong> ChannelId จาก trigger ต้องตรงกับ LaneNo ใน config <code>capture_lpr</code> / <code>capture_overview</code> — ถ้า map ผิด โค้ดแก้ logic อย่างเดียวไม่พอ</li>
+  <li><strong>รถชิดกันมากบนเลนเดียว:</strong> อาจต้องลดช่วง minimum_search / maximum_search</li>
+  <li><strong>ไม่ได้ติดตั้ง package ใหม่</strong> — ใช้ dependency เดิม (axios, sharp, mysql2, dayjs ฯลฯ)</li>
+</ul>
+
+<div class="footer">
+  เอกสารนี้สร้างจากการปรับปรุงโค้ด imps_service — LPR Snap Performance Fix<br/>
+  สอบถามเพิ่มเติม: ดูไฟล์ในโฟลเดอร์ src/utils/snapshotRegistry.js และ snapshotManager.js
+</div>
+
+</body>
+</html>

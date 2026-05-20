@@ -19,8 +19,9 @@ function mapConfigurationKeys(config) {
       flux_video_chanel: config.flux_video_chanel || 0,
       gvw_ignored: config.gvw_ignored || 0,
       vehicle_length_ignored: config.vehicle_length_ignored || 0,
-      minimum_search: config.minimum_search || 1000,
-      maximum_search: config.maximum_search || 5000,
+      // หน่วย ms — ช่วงเวลาค้นหารูป snap เทียบกับ stamp รถ (ดูตาราง configuration)
+      minimum_search: config.minimum_search ?? 2000,
+      maximum_search: config.maximum_search ?? 8000,
       ocr_url: config.ocr_url || "http://default-ocr-url",
       central_server_url: config.central_server_url || "http://default-central-server-url",
       center_station_url: config.center_station_url || "http://default-center-station-url",

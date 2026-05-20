@@ -21,6 +21,7 @@ const {
   isReverseDirection
 } = require("../utils/mappers/mapDataLogger");
 const SnapshotManager = require("../utils/snapshotManager");
+const { normalizeLane } = require("../utils/snapshotRegistry");
 const dayjs = require("dayjs");
 const ocrService = require("../utils/ocrService");
 const pool = require("../config/db");
@@ -301,10 +302,10 @@ class DataLogger extends WSController {
 
       if (!mappedData.overviewPath && !mappedData.platePath) {
         console.warn(
-          "Retrying to find snapshots after 5 seconds...",
+          "Retrying to find snapshots after 1.5 seconds...",
           vehicleID
         );
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         const retryResult = await this.findAndProcessSnapshots(mappedData);
         if (!retryResult.continueProcessing) {
           console.warn("Retry failed. Skipping.");
@@ -372,42 +373,39 @@ class DataLogger extends WSController {
 
       if (rawTriggerData.data.TriggerType === "Start") {
         try {
-          // Find the LPR snapshot URL for the given channelId
+          const lane = normalizeLane(channelId);
           const lprSnapshotConfig = this.config.capture_lpr.find(
-            (item) => item.lane == channelId
+            (item) => normalizeLane(item.lane) === lane
           );
-
-          // Find the Overview snapshot URL for the given channelId
           const overviewSnapshotConfig = this.config.capture_overview.find(
-            (item) => item.lane == channelId
+            (item) => normalizeLane(item.lane) === lane
           );
 
           if (!lprSnapshotConfig || !overviewSnapshotConfig) {
             console.warn(
               `Snapshot configuration not found for lane ${channelId}`
             );
-            return; // Exit if configuration is missing
+            return;
           }
 
-          const lprSnapshotUrl = lprSnapshotConfig.snap_code;
-          const overviewSnapshotUrl = overviewSnapshotConfig.snap_code;
-
-          // Metadata for snapshot
           const metadata = {
             stamp: dayjs(rawTime),
-            lane: channelId,
+            lane,
           };
 
-          // Proceed with capturing snapshots
-          this.lprSnapshotManager.takeSnapshot(lprSnapshotUrl, {
-            ...metadata,
-            type: "lpr",
-          });
-
-          this.overviewSnapshotManager.takeSnapshot(overviewSnapshotUrl, {
-            ...metadata,
-            type: "overview",
-          });
+          await Promise.all([
+            this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, {
+              ...metadata,
+              type: "lpr",
+            }),
+            this.overviewSnapshotManager.takeSnapshot(
+              overviewSnapshotConfig.snap_code,
+              {
+                ...metadata,
+                type: "overview",
+              }
+            ),
+          ]);
         } catch (err) {
           console.error("Error processing trigger message:", err);
         }
