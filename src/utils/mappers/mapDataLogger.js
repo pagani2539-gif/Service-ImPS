@@ -2,22 +2,22 @@
 // Utildatay to map error flags
 function mapWarningFlag(data) {
   const warningFlag = data.warningFlags;
-  warningFlag_binary = warningFlag.toString(2).split("").reverse();
-  arr_index_warning = warningFlag_binary
+  const warningFlag_binary = warningFlag.toString(2).split("").reverse();
+  const arr_index_warning = warningFlag_binary
     .map((elm, idx) => (elm == 1 ? idx : ""))
     .filter(String);
-  arr_index_warning = arr_index_warning.filter((value) =>
+  const filtered_warning = arr_index_warning.filter((value) =>
     // [4, 9, 10].includes(value)
     [9, 10].includes(value)
   );
-  data.warningFlag = arr_index_warning;
-  data.isWarningFlagged = arr_index_warning.length > 0;
+  data.warningFlag = filtered_warning;
+  data.isWarningFlagged = filtered_warning.length > 0;
   return data;
 }
 function mapErrorFlag(data) {
   const errorFlag = data.errorFlags;
-  errorFlag_binary = errorFlag.toString(2).split("");
-  arr_index_error = errorFlag_binary
+  const errorFlag_binary = errorFlag.toString(2).split("").reverse();
+  const arr_index_error = errorFlag_binary
     .map((elm, idx) => (elm == 1 ? idx : ""))
     .filter(String);
   data.errorFlag = arr_index_error;
@@ -380,23 +380,31 @@ function mapDataLogger(rawData) {
 }
 
 /**
- * Inserts a dash into the license plate if all characters are numeric.
- * - If length is 6, inserts a dash at index 3.
- * - If length is 7, inserts a dash at index 4.
+ * Inserts a space or dash into the license plate.
+ * - If numeric (Truck/Bus), inserts a dash (e.g., 70-1234).
+ * - If contains Thai characters (Passenger), inserts a space (e.g., 1หป 1234, กข 1234).
  * @param {string} licensePlate - The license plate string.
- * @returns {string} - Modified license plate string with a dash or the original string.
+ * @returns {string} - Formatted license plate string.
  */
 function formatLicensePlate(licensePlate) {
-  if (/^\d+$/.test(licensePlate)) {
-    // Check if all characters are numbers
-    if (licensePlate.length === 6) {
-      return licensePlate.slice(0, 2) + "-" + licensePlate.slice(2);
-    }
-    if (licensePlate.length === 7) {
-      return licensePlate.slice(0, 3) + "-" + licensePlate.slice(3);
-    }
+  if (!licensePlate) return "";
+  const clean = licensePlate.replace(/[-\s]/g, "");
+
+  // 1. Truck/Bus (Numeric only, 6-7 digits)
+  if (/^\d+$/.test(clean)) {
+    if (clean.length === 6) return clean.slice(0, 2) + "-" + clean.slice(2);
+    if (clean.length === 7) return clean.slice(0, 3) + "-" + clean.slice(3);
+    return clean;
   }
-  return licensePlate; // Return the original string if conditions are not met
+
+  // 2. Passenger (Thai characters present)
+  // Pattern: (Optional digit + 1-3 Thai letters) + (Remaining digits)
+  const match = clean.match(/^([0-9]?[\u0E01-\u0E2E]{1,3})([0-9]+)$/);
+  if (match) {
+    return match[1] + " " + match[2];
+  }
+
+  return licensePlate;
 }
 
 /**
@@ -424,82 +432,53 @@ function isBusByWheelbase(wheelbase, minimumWheelbase) {
 
 
 /**
- * Check if the vehicle is a bus based on the license plate.
- * @param {String} licensePlate - The license plate of the vehicle.
- * @returns {Boolean} - Returns true if the vehicle is identified as a bus, false otherwise.
+ * Revised license plate filter based on Thai DLT standards.
+ * 1. Filters out plates with Thai character prefixes (Passenger cars).
+ * 2. Filters out numeric prefixes 10-49 (Buses/Passenger vehicles).
+ * 3. Keeps numeric prefixes 50-99 (Trucks).
+ * 4. Filters out new format (e.g., 1หป 1234).
  */
-function isBusByLicensePlate(licensePlate) {
+function isVehicleExcludedByPlate(licensePlate) {
   if (!licensePlate || typeof licensePlate !== "string") return false;
 
-  // Split the license plate into characters
-  const licensePlateArr = licensePlate.split("");
+  const cleanPlate = licensePlate.replace(/[-\s]/g, "");
+  if (cleanPlate.length === 0) return false;
 
-  // Check if it meets the bus criteria
-  if (
-    licensePlateArr.length > 1 &&
-    (["1", "2", "3", "4"].includes(licensePlateArr[0]) || // Starts with specific numbers
-      isNaN(parseInt(licensePlateArr[0])) || // First character is not a number
-      isNaN(parseInt(licensePlateArr[1]))) // Second character is not a number
-  ) {
-    console.log("isBusByLicensePlate");
-    return true; // It's a bus
-  }
-
-  return false; // Not a bus
-}
-
-/**
- * Check if the GVW should be ignored based on predefined conditions.
- * @param {Object} data - The mapped data object containing GVW and other details.
- * @returns {Boolean} - Returns true if GVW should be ignored, false otherwise.
- */
-function ignoreGVW(gvw, gvwIgnored) {
-  if (!gvw || typeof gvw === "undefined") return true; // Ignore if no GVW data
-
-  // Example conditions for ignoring GVW
-  if (gvw < gvwIgnored) {
+  // 1. Starts with Thai character (e.g., กข 1234) -> Exclude
+  const firstChar = cleanPlate.charCodeAt(0);
+  if (firstChar >= 0x0E01 && firstChar <= 0x0E2E) {
+    console.log(`[Filter] Excluded by Thai prefix: ${licensePlate}`);
     return true;
   }
-  return false; // GVW is valid
-}
 
-/**
- * Check if the vehicle's wheelbase is ignored based on a minimum length.
- * @param {Number} wheelbase - The wheelbase of the vehicle in millimeters (or appropriate units).
- * @param {Number} minLength - The minimum wheelbase length to not be ignored.
- * @returns {Boolean} - Returns true if the wheelbase is less than the minimum length (ignored), false otherwise.
- */
-function isIgnoredLength(wheelbase, minLength) {
-  if (
-    !wheelbase ||
-    typeof wheelbase !== "number" ||
-    !minLength ||
-    typeof minLength !== "number"
-  ) {
-    return false; // Invalid input
+  // 2. Starts with digit
+  if (/^\d/.test(cleanPlate)) {
+    // Check for new format: Digit + Thai char (e.g., 1หป 1234) -> Exclude
+    if (cleanPlate.length > 1) {
+      const secondChar = cleanPlate.charCodeAt(1);
+      if (secondChar >= 0x0E01 && secondChar <= 0x0E2E) {
+        console.log(`[Filter] Excluded by modern Thai prefix (digit+char): ${licensePlate}`);
+        return true;
+      }
+    }
+
+    // DLT standard prefixes for trucks/buses
+    const prefix = parseInt(cleanPlate.substring(0, 2), 10);
+    if (prefix >= 10 && prefix <= 49) {
+      console.log(`[Filter] Excluded by Bus/Passenger prefix: ${prefix} (${licensePlate})`);
+      return true;
+    }
+    
+    // Truck ranges (50-99) -> Keep
+    if (prefix >= 50 && prefix <= 99) {
+      return false; 
+    }
   }
 
-  // Check if the wheelbase is less than the minimum length
-  if (wheelbase < minLength) {
-    console.log("isIgnoredLength");
-    return true; // Wheelbase is ignored
-  }
-
-  return false; // Wheelbase is not ignored
+  // Default: Keep if it doesn't clearly match exclusion criteria
+  return false;
 }
 
-
-/**
- * Check if the license plate contains non-numeric characters.
- * @param {String} licensePlate - The license plate of the vehicle.
- * @returns {Boolean} - Returns true if the license plate contains non-numeric characters, false otherwise.
- */
-function hasNonNumericCharacters(licensePlate) {
-  if (!licensePlate || typeof licensePlate !== "string") return false; // Handle null or invalid input
-
-  // Check if the license plate contains any non-numeric character
-  return /[^0-9]/.test(licensePlate); // Matches any character that is not a digit (0-9)
-}
 
 
 /**
@@ -576,12 +555,9 @@ module.exports = {
   mapWarningFlag,
   mapErrorFlag,
   setSingleTire,
-  isBusByLicensePlate,
-  ignoreGVW,
-  hasNonNumericCharacters,
+  isVehicleExcludedByPlate,
   formatLicensePlate,
   isBusByWheelbase,
-  isIgnoredLength,
   mergeStraddlingVehicles,
   isReverseDirection
 };

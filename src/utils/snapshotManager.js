@@ -7,7 +7,7 @@ const FormData = require("form-data");
 const { snapshotRegistry, normalizeLane } = require("./snapshotRegistry");
 
 const SNAP_MATCH_POLL_MS = Number(process.env.SNAP_MATCH_POLL_MS) || 150;
-const SNAP_MATCH_MAX_WAIT_MS = Number(process.env.SNAP_MATCH_MAX_WAIT_MS) || 3000;
+const SNAP_MATCH_MAX_WAIT_MS = Number(process.env.SNAP_MATCH_MAX_WAIT_MS) || 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,6 +54,8 @@ class SnapshotManager {
       await fs.writeFile(filePath, response.data);
 
       const stampDate = date.toDate();
+      
+      // Register in memory FIRST to ensure it's claimable immediately
       snapshotRegistry.register({
         lane,
         type,
@@ -61,10 +63,16 @@ class SnapshotManager {
         imageUrl: filePath,
       });
 
-      await this.pool.execute(
-        `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-        [lane, type, stampDate, filePath]
-      );
+      // Then save to DB (we don't strictly need to await this if we want speed, 
+      // but awaiting ensures DB consistency if memory fails)
+      try {
+        await this.pool.execute(
+          `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
+          [lane, type, stampDate, filePath]
+        );
+      } catch (dbErr) {
+        console.error(`[Snapshot] DB Insert failed for ${filename}:`, dbErr.message);
+      }
 
       return { lane, type, stamp: stampDate, imageUrl: filePath };
     } catch (err) {
@@ -90,21 +98,25 @@ class SnapshotManager {
     }
 
     const deadline = Date.now() + SNAP_MATCH_MAX_WAIT_MS;
+    let attempts = 0;
 
     while (Date.now() <= deadline) {
+      attempts++;
       const found = await this._findSnapshotOnce(mappedData, type);
       if (found) return found;
       if (Date.now() + SNAP_MATCH_POLL_MS > deadline) break;
       await sleep(SNAP_MATCH_POLL_MS);
     }
 
+    const targetTime = dayjs(mappedData.stamp).format("HH:mm:ss.SSS");
+    console.warn(`[Snapshot] Not found after ${attempts} attempts (${SNAP_MATCH_MAX_WAIT_MS}ms). Type: ${type}, Target: ${targetTime}, Lane: ${mappedData.lane}`);
     return null;
   }
 
   async _findSnapshotOnce(mappedData, type) {
     const lane = normalizeLane(mappedData.lane);
-    const minMs = this.config.minimum_search || 1000;
-    const maxMs = this.config.maximum_search || 5000;
+    const minMs = this.config.minimum_search || 2000;
+    const maxMs = this.config.maximum_search || 8000;
 
     const fromMemory = snapshotRegistry.claimClosest(
       { ...mappedData, lane },
@@ -113,7 +125,8 @@ class SnapshotManager {
       maxMs
     );
     if (fromMemory) {
-      await this._deleteSnapshotRow(fromMemory.imageUrl);
+      // Use background delete to not block processing
+      this._deleteSnapshotRow(fromMemory.imageUrl).catch(() => {});
       return fromMemory;
     }
 
@@ -145,7 +158,7 @@ class SnapshotManager {
           continue;
         }
         snapshotRegistry.markUsed(lane, type, row.stamp, row.image_url);
-        await this._deleteSnapshotRow(row.image_url);
+        this._deleteSnapshotRow(row.image_url).catch(() => {});
         return {
           stamp: dayjs(row.stamp).toDate(),
           lane,
@@ -157,7 +170,7 @@ class SnapshotManager {
       return null;
     } catch (err) {
       console.error(
-        `Error finding snapshots for lane ${lane}, type ${type}:`,
+        `[Snapshot] DB Query error for lane ${lane}, type ${type}:`,
         err.message
       );
       return null;
@@ -198,11 +211,12 @@ class SnapshotManager {
       formData.append("image", fs.createReadStream(filePath));
       formData.append("fileName", fileName);
 
+      // Increased timeout to 10s for midnight stability
       const response = await axios.post(this.uploadUrl, formData, {
         headers: {
           ...formData.getHeaders(),
         },
-        timeout: 5000,
+        timeout: 10000, 
       });
 
       if (response.data && response.data.fileUrl) {
@@ -210,7 +224,7 @@ class SnapshotManager {
       }
       throw new Error("Response does not contain fileUrl");
     } catch (err) {
-      console.error(`Error uploading image: ${err.message}`);
+      console.error(`[Upload] Failed for ${path.basename(filePath)}: ${err.message}`);
       return {
         success: false,
         message: `Error uploading image: ${err.message}`,

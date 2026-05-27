@@ -13,6 +13,7 @@ const {
   isBusByLicensePlate,
   ignoreGVW,
   hasNonNumericCharacters,
+  isVehicleExcludedByPlate,
   formatLicensePlate,
   isBusByWheelbase,
   isCrossingLaneWarning,
@@ -75,83 +76,76 @@ class InterComp extends WSController {
     this.closeSockets();
     console.log("Intercomp stopped successfully.");
   }
-  async findAndProcessSnapshots(mappedData) {
-    const [lprSnapshots, overviewSnapshots] = await Promise.all([
-      this.lprSnapshotManager.findSnapshots(mappedData, "lpr"),
-      this.overviewSnapshotManager.findSnapshots(mappedData, "overview"),
-    ]);
+  async findAndProcessSnapshots(mappedData, existingLpr = null, existingOverview = null) {
+    // 1. เริ่มค้นหาเฉพาะส่วนที่ยังไม่มีข้อมูล (รองรับการ Retry)
+    // Smart Retry: ถ้ามี snapshot เดิมที่เคยหาเจอแล้วแต่ upload พลาด ให้ใช้ใบเดิม
+    const lprSearchPromise = !mappedData.platePath 
+      ? (existingLpr ? Promise.resolve(existingLpr) : this.lprSnapshotManager.findSnapshots(mappedData, "lpr"))
+      : Promise.resolve(null);
+      
+    const overviewSearchPromise = !mappedData.overviewPath
+      ? (existingOverview ? Promise.resolve(existingOverview) : this.overviewSnapshotManager.findSnapshots(mappedData, "overview"))
+      : Promise.resolve(null);
 
-    if (!lprSnapshots && !overviewSnapshots) {
-      console.warn("No LPR or Overview snapshots found.");
-      return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Include snapshots in return
-    }
+    let lprSnapshotsFound = existingLpr;
+    let overviewSnapshotsFound = existingOverview;
 
-    const [ocrResult, overviewUploadResult, lprUploadResult] =
-      await Promise.all([
-        lprSnapshots
-          ? ocrService.sendToOCR(lprSnapshots, this.config.ocr_url)
-          : Promise.resolve(null),
-        overviewSnapshots
-          ? this.overviewSnapshotManager.uploadImage(
-              overviewSnapshots.imageUrl,
-              "overview"
-            )
-          : Promise.resolve({ success: false }),
-        lprSnapshots
-          ? this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
-          : Promise.resolve({ success: false }),
+    // 2. จัดการส่วน LPR ทันทีที่ค้นหาเสร็จ
+    const lprProcessPromise = lprSearchPromise.then(async (lprSnapshots) => {
+      if (!lprSnapshots) return null;
+      lprSnapshotsFound = lprSnapshots;
+
+      const [ocrResult, lprUploadResult] = await Promise.all([
+        ocrService.sendToOCR(lprSnapshots, this.config.ocr_url),
+        this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
       ]);
 
-    if (ocrResult) {
-      
-      if (isBusByLicensePlate(ocrResult.license_plate)) {
-        return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
-      }
-      if (hasNonNumericCharacters(ocrResult.license_plate)) {
-        return { continueProcessing: false, lprSnapshots, overviewSnapshots }; // Indicate stop
-      }
-
-      const cropUploadResult = ocrResult.crop_path
-        ? await this.cropSnapshotManager.uploadImage(
-            ocrResult.crop_path,
-            "crop"
-          )
-        : { success: false };
-
-      if (lprUploadResult.success) {
-        ocrResult.plate_path = lprUploadResult.data.fileUrl;
-      }
-      if (cropUploadResult.success) {
-        ocrResult.crop_path = cropUploadResult.data.fileUrl;
-      }
-
-      mappedData.platePath = ocrResult.plate_path;
-      mappedData.licensePlate = formatLicensePlate(ocrResult.license_plate);
-      mappedData.cropPath = ocrResult.crop_path;
-      mappedData.province = ocrResult.province;
-    } else {
-      if (mappedData.vehicleClassID==2) { //ตัดรถประเภท 2 ที่มีความยาวเกิน
-        if (
-          isBusByWheelbase(
-            mappedData.axles[1].wheelbase,
-            this.config.wheelbase_bus
-          )
-        ) {
-          return ;
+      if (ocrResult) {
+        if (isVehicleExcludedByPlate(ocrResult.license_plate)) {
+          return { exclude: true };
         }
+
+        const cropUploadResult = ocrResult.crop_path
+          ? await this.cropSnapshotManager.uploadImage(ocrResult.crop_path, "crop")
+          : { success: false };
+
+        if (lprUploadResult.success) mappedData.platePath = lprUploadResult.data.fileUrl;
+        if (cropUploadResult.success) mappedData.cropPath = cropUploadResult.data.fileUrl;
+        
+        mappedData.licensePlate = formatLicensePlate(ocrResult.license_plate);
+        mappedData.province = ocrResult.province;
+      } else {
+        // กรณีอ่าน OCR ไม่ได้ (การคัดกรองรถบัสด้วยฐานล้อถูกทำไปแล้วที่ handleDataMessage)
+        if (lprUploadResult.success) mappedData.platePath = lprUploadResult.data.fileUrl;
       }
-      if (lprUploadResult.success) {
-        mappedData.platePath = lprUploadResult.data.fileUrl;
+      return { exclude: false, snapshots: lprSnapshots };
+    });
+
+    // 3. จัดการส่วน Overview ทันทีที่ค้นหาเสร็จ
+    const overviewProcessPromise = overviewSearchPromise.then(async (overviewSnapshots) => {
+      if (!overviewSnapshots) return null;
+      overviewSnapshotsFound = overviewSnapshots;
+      const uploadResult = await this.overviewSnapshotManager.uploadImage(overviewSnapshots.imageUrl, "overview");
+      if (uploadResult.success) {
+        mappedData.overviewPath = uploadResult.data.fileUrl;
       }
-      console.warn("OCR result is null. LPR snapshot uploaded.");
+      return overviewSnapshots;
+    });
+
+    const [lprRes, overviewRes] = await Promise.all([lprProcessPromise, overviewProcessPromise]);
+
+    if (lprRes && lprRes.exclude) {
+      return { continueProcessing: false, isExcluded: true };
     }
 
-    if (overviewUploadResult.success) {
-      mappedData.overviewPath = overviewUploadResult.data.fileUrl;
-    }
-
-    return { continueProcessing: true, lprSnapshots, overviewSnapshots }; // Include snapshots in return
+    return { 
+        continueProcessing: true, 
+        isExcluded: false,
+        lprSnapshots: lprSnapshotsFound,
+        overviewSnapshots: overviewSnapshotsFound
+    };
   }
+
   async handleDataMessage(message) {
     try {
       const rawData = JSON.parse(message);
@@ -168,35 +162,27 @@ class InterComp extends WSController {
       let singleDualTire = null;
       if (PICO_BASE && mappedData.lane === 1) {
         try {
-          singleDualTire = getSingleDualTire(
-            PICO_BASE,
-            StartTime,
-            StartTimeLastPresenceFall,
-            ID
-          );
-        } catch (err) {
-          console.error("Error processing singleDualTire:", err);
-          // เลือกได้ว่าจะ throw ต่อ หรือแค่ log
-          // throw err;
-        }
+          singleDualTire = getSingleDualTire(PICO_BASE, StartTime, StartTimeLastPresenceFall, ID);
+        } catch (err) { console.error("Error processing singleDualTire:", err); }
       }
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
         if(isIgnoredLength(mappedData.axles[1].wheelbase,this.config.vehicle_length_ignored)){
           return ;
         }
+        // คัดรถบัสด้วยฐานล้อทันที (ก่อนไปหารูป)
+        if (mappedData.vehicleClassID === 2 && isBusByWheelbase(mappedData.axles[1].wheelbase, this.config.wheelbase_bus)) {
+          console.log(`[Filter] Excluded Bus by wheelbase: ${mappedData.axles[1].wheelbase} (ID: ${ID})`);
+          return;
+        }
       }
-      // Check the result of findAndProcessSnapshots
-      const { continueProcessing, lprSnapshots, overviewSnapshots } =
-        await this.findAndProcessSnapshots(mappedData);
+      
+      const findResult = await this.findAndProcessSnapshots(mappedData);
 
-      if (!continueProcessing) {
-        console.warn(
-          "Snapshot processing failed or exited early. Skipping further steps."
-        );
-        return; // Exit the function early
+      if (findResult.isExcluded) {
+        console.warn(`[Filter] Vehicle excluded (ID: ${ID}).`);
+        return;
       }
-
 
       sendToVMS(this.config.led_url, mappedData);
 
@@ -205,54 +191,34 @@ class InterComp extends WSController {
 
       if (threeDimensionBase) {
         try {
-          const threeDimensionData = await getThreeDimension(
-            threeDimensionBase,
-            mappedData,
-            vehicleID
-          );
-
-          if (threeDimensionData) {
-            await insertThreeDimensionWithWarnings(threeDimensionData);
-          }
-        } catch (err) {
-          console.error("Error processing threeDimension:", err);
-          // คุณสามารถเลือกโยน error ต่อ หรือแค่ log ไว้
-          // throw err;
-        }
+          const threeDimensionData = await getThreeDimension(threeDimensionBase, mappedData, vehicleID);
+          if (threeDimensionData) await insertThreeDimensionWithWarnings(threeDimensionData);
+        } catch (err) { console.error("Error processing threeDimension:", err); }
       }
 
-      // Send data to WebSocket server
       sendToWebSocket({ vehicleID: vehicleID });
       sendToTransmission(transmissionUrl,{ vehicleID: vehicleID } );
 
-      if (!mappedData.overviewPath && !mappedData.platePath) {
-        console.warn(
-          "Retrying to find snapshots after 1.5 seconds...",
-          vehicleID
+      if (!mappedData.overviewPath || !mappedData.platePath) {
+        console.warn(`Missing images for Vehicle ID: ${vehicleID}. Retrying in 2s...`);
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        
+        const retryResult = await this.findAndProcessSnapshots(
+            mappedData,
+            findResult.lprSnapshots,
+            findResult.overviewSnapshots
         );
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        const retryResult = await this.findAndProcessSnapshots(mappedData);
-        if (!retryResult.continueProcessing) {
-          console.warn("Retry failed. Skipping.");
-          return;
+        if (retryResult.isExcluded) return;
+
+        if (mappedData.overviewPath) await updateOverview(vehicleID, mappedData.overviewPath);
+        if (mappedData.platePath) {
+          await updatePlates(vehicleID, mappedData.licensePlate, mappedData.platePath, mappedData.province, mappedData.cropPath);
         }
-        if(mappedData.overviewPath || mappedData.platePath) {
-          if (mappedData.overviewPath) {
-            await updateOverview(vehicleID, mappedData.overviewPath);
-          }
-          if (mappedData.platePath) {
-            await updatePlates(
-              vehicleID,
-              mappedData.licensePlate,
-              mappedData.platePath,
-              mappedData.province,
-              mappedData.cropPath
-            );
-          }
+        
+        if (mappedData.overviewPath || mappedData.platePath) {
           sendToWebSocket({ vehicleID: vehicleID });
           sendToTransmission(transmissionUrl,{ vehicleID: vehicleID } );
         }
-
       }
     } catch (err) {
       console.error("DataLogger error handling data message:", err);
@@ -289,8 +255,21 @@ class InterComp extends WSController {
           return;
         }
 
+        // Robust date handling for midnight transitions
+        let stamp = dayjs(convertDataTimeToMillisecond(rawTime));
+        const now = dayjs();
+        
+        // Although InterComp usually uses timestamps, this check adds safety for clock drifts
+        if (stamp.isValid()) {
+            if (stamp.diff(now, 'hour') > 12) {
+              stamp = stamp.subtract(1, 'day');
+            } else if (now.diff(stamp, 'hour') > 12) {
+              stamp = stamp.add(1, 'day');
+            }
+        }
+
         const metadata = {
-          stamp: dayjs(convertDataTimeToMillisecond(rawTime)),
+          stamp,
           lane,
         };
 

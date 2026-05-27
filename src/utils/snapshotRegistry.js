@@ -5,12 +5,13 @@ const dayjs = require("dayjs");
  * Matches by closest timestamp per lane/type and prevents reuse (wrong vehicle).
  */
 class SnapshotRegistry {
-  constructor(maxPerLaneType = 30) {
+  constructor(maxPerLaneType = 200) {
     this.maxPerLaneType = maxPerLaneType;
     /** @type {Map<string, Array<{stamp: number, imageUrl: string}>>} */
     this.pending = new Map();
     /** @type {Set<string>} */
     this.usedKeys = new Set();
+    this.lastPrune = Date.now();
   }
 
   _key(lane, type) {
@@ -35,8 +36,10 @@ class SnapshotRegistry {
     }
     this.pending.set(key, list);
 
-    // Auto-prune stale usedKeys to prevent memory leak
-    this.prune();
+    // Auto-prune stale usedKeys every 1 minute OR when it gets too large
+    if (Date.now() - this.lastPrune > 60000 || this.usedKeys.size > 500) {
+      this.prune();
+    }
   }
 
   /**
@@ -45,12 +48,18 @@ class SnapshotRegistry {
   prune() {
     const now = Date.now();
     const expiryMs = 5 * 60 * 1000; // 5 minutes
+    const initialSize = this.usedKeys.size;
+    
     for (const key of this.usedKeys) {
       const parts = key.split(":");
       const stampVal = Number(parts[2]);
       if (Number.isFinite(stampVal) && (now - stampVal) > expiryMs) {
         this.usedKeys.delete(key);
       }
+    }
+    this.lastPrune = now;
+    if (initialSize > 500) {
+        console.log(`[Registry] Pruned usedKeys. Size: ${initialSize} -> ${this.usedKeys.size}`);
     }
   }
 

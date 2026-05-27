@@ -1,91 +1,110 @@
-const fs = require("fs");
+const fs = require("fs").promises;
+const fsSync = require("fs");
 const path = require("path");
 const schedule = require("node-schedule");
 const pool = require("../config/db");
+const dayjs = require("dayjs");
 const snapshotsDir = path.join(__dirname, "../../public/snapshots");
 
-// Function to remove a directory and its contents recursively with error handling
-const removeDirectoryFast = (dirPath) => {
+/**
+ * Optimized removal of a directory and its contents (Asynchronous)
+ */
+const removeDirectoryAsync = async (dirPath) => {
   try {
-    if (fs.existsSync(dirPath)) {
-      fs.rmSync(dirPath, { recursive: true, force: true }); // Fast removal
-      console.log(`Deleted directory and its contents: ${dirPath}`);
+    if (fsSync.existsSync(dirPath)) {
+      await fs.rm(dirPath, { recursive: true, force: true });
+      console.log(`[Cleanup] Deleted directory: ${dirPath}`);
     }
   } catch (err) {
-    if (err.code === "EPERM") {
-      console.error(`Permission error: Unable to delete ${dirPath}`);
-    } else {
-      console.error(`Error deleting ${dirPath}:`, err.message);
-    }
+    console.error(`[Cleanup] Error deleting ${dirPath}:`, err.message);
   }
 };
 
-// Function to clean up old subfolders in the snapshots directory
+/**
+ * Clean up snapshots older than retention period (Non-blocking)
+ */
 const removeOldFolders = async () => {
-  const retentionDays = 3; // เก็บได้นานสุด 3 วัน
-  const currentDate = new Date();
-  const todayUTC = new Date(Date.UTC(currentDate.getFullYear(), currentDate.getMonth(), currentDate.getDate()));
-  const thresholdDate = new Date(todayUTC.getTime() - (retentionDays - 1) * 24 * 60 * 60 * 1000);
+  const retentionDays = 3;
+  // Calculate threshold: anything BEFORE 00:00:00.000 of (today - (retentionDays-1))
+  // e.g. Today is 22nd. Retention 3 days means keep 22, 21, 20. Delete 19 and older.
+  const thresholdDate = dayjs().startOf('day').subtract(retentionDays - 1, 'day');
+  const thresholdTimestamp = thresholdDate.toDate();
 
-  if (fs.existsSync(snapshotsDir)) {
+  console.log(`[Cleanup] Starting cleanup. Threshold: ${thresholdDate.format('YYYY-MM-DD')}`);
+
+  if (!fsSync.existsSync(snapshotsDir)) {
+    console.error("[Cleanup] Snapshots directory does not exist.");
+    return;
+  }
+
+  try {
     const types = ["lpr", "overview"];
     for (const type of types) {
       const typeDir = path.join(snapshotsDir, type);
-      if (!fs.existsSync(typeDir)) continue;
+      if (!fsSync.existsSync(typeDir)) continue;
 
-      fs.readdirSync(typeDir).forEach((yearFolder) => {
+      const yearFolders = await fs.readdir(typeDir);
+      for (const yearFolder of yearFolders) {
         const yearPath = path.join(typeDir, yearFolder);
-        if (fs.lstatSync(yearPath).isDirectory()) {
-          fs.readdirSync(yearPath).forEach((monthFolder) => {
-            const monthPath = path.join(yearPath, monthFolder);
-            if (fs.lstatSync(monthPath).isDirectory()) {
-              fs.readdirSync(monthPath).forEach((dayFolder) => {
-                const dayPath = path.join(monthPath, dayFolder);
-                if (fs.lstatSync(dayPath).isDirectory()) {
-                  const folderDate = new Date(
-                    `${yearFolder}-${monthFolder}-${dayFolder}`
-                  );
+        const yearStat = await fs.stat(yearPath);
+        if (!yearStat.isDirectory()) continue;
 
-                  // Check if folder date is older than 3 days
-                  if (folderDate && folderDate < thresholdDate) {
-                    removeDirectoryFast(dayPath); // Fast folder removal
-                  }
-                }
-              });
+        const monthFolders = await fs.readdir(yearPath);
+        for (const monthFolder of monthFolders) {
+          const monthPath = path.join(yearPath, monthFolder);
+          const monthStat = await fs.stat(monthPath);
+          if (!monthStat.isDirectory()) continue;
 
-              // Remove empty month folder
-              if (fs.existsSync(monthPath) && fs.readdirSync(monthPath).length === 0) {
-                removeDirectoryFast(monthPath);
-              }
+          const dayFolders = await fs.readdir(monthPath);
+          for (const dayFolder of dayFolders) {
+            const dayPath = path.join(monthPath, dayFolder);
+            const dayStat = await fs.stat(dayPath);
+            if (!dayStat.isDirectory()) continue;
+
+            // Construct date: YYYY-MM-DD (treated as local time by dayjs)
+            const folderDate = dayjs(`${yearFolder}-${monthFolder}-${dayFolder}`, 'YYYY-MM-DD');
+            
+            if (folderDate.isValid() && folderDate.isBefore(thresholdDate, 'day')) {
+              await removeDirectoryAsync(dayPath);
             }
-          });
+          }
 
-          // Remove empty year folder
-          if (fs.existsSync(yearPath) && fs.readdirSync(yearPath).length === 0) {
-            removeDirectoryFast(yearPath);
+          // Cleanup empty month folders
+          const remainingDays = await fs.readdir(monthPath);
+          if (remainingDays.length === 0) {
+            await removeDirectoryAsync(monthPath);
           }
         }
-      });
+
+        // Cleanup empty year folders
+        const remainingMonths = await fs.readdir(yearPath);
+        if (remainingMonths.length === 0) {
+          await removeDirectoryAsync(yearPath);
+        }
+      }
     }
-    console.log("Snapshots cleanup completed.");
-  } else {
-    console.error("Snapshots directory does not exist.");
+    console.log("[Cleanup] Snapshots file cleanup completed.");
+  } catch (err) {
+    console.error("[Cleanup] Error during file cleanup loop:", err.message);
   }
 
-  // Delete records older than 3 days from the snapshots table instead of truncating
+  // Database cleanup
   try {
-    console.log("Deleting old snapshot records from database...");
-    await pool.execute("DELETE FROM snapshots WHERE stamp < ?", [thresholdDate]);
-    console.log("Old snapshot records deleted successfully.");
+    console.log("[Cleanup] Deleting old snapshot records from database...");
+    const [result] = await pool.execute(
+      "DELETE FROM snapshots WHERE stamp < ?", 
+      [thresholdTimestamp]
+    );
+    console.log(`[Cleanup] Database cleanup completed. Rows deleted: ${result.affectedRows}`);
   } catch (err) {
-    console.error("Error deleting old snapshot records:", err.message);
+    console.error("[Cleanup] Error deleting old snapshot records:", err.message);
   }
 };
 
-// Schedule the task to run every midnight
-schedule.scheduleJob("0 0 * * *", () => {
-  console.log("Running snapshots cleanup...");
-  removeOldFolders();
+// Schedule the task to run every day at 04:00 AM
+schedule.scheduleJob("0 4 * * *", async () => {
+  console.log(`[Cleanup] Daily task started at ${new Date().toISOString()}`);
+  await removeOldFolders();
 });
 
 module.exports = { removeOldFolders };
