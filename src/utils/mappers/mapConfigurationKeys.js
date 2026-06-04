@@ -36,6 +36,8 @@ function mapConfigurationKeys(config) {
       led_enabled: config.led_enabled || 0,
       wheelbase_bus: config.wheelbase_bus || 0,
       vehicle_length_ignored:config.vehicle_length_ignored||0,
+      retention_days: config.retention_days ?? 3,
+      straddling_time_diff: config.straddling_time_diff ?? 3,
     };
   }
   

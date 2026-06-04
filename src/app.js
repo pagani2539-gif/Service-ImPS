@@ -1,4 +1,4 @@
-// src\app.js
+// src/app.js
 require("dotenv").config();
 
 // Configure Keep-Alive for Axios to prevent HTTPS timeouts and socket exhaustion under high load
@@ -19,6 +19,7 @@ const {
   getSingleTires,
 } = require("./services/vehiclesService");
 const mapConfigurationKeys = require("./utils/mappers/mapConfigurationKeys");
+const logger = require("./utils/logger");
 let currentController = null; // Store the current controller instance
 
 async function initializeController() {
@@ -30,7 +31,7 @@ async function initializeController() {
 
     const config = mapConfigurationKeys(configurations);
     if (config.controller_id === 1) {
-      // console.log(`Initializing DataLogger for station: ${config.station_name}`);
+      logger.info(`Initializing DataLogger for station: ${config.station_name}`);
       return new DataLogger(
         config.controller_data_url,
         config.controller_sensor_url,
@@ -40,7 +41,7 @@ async function initializeController() {
         singleTires
       );
     } else if (config.controller_id === 2) {
-      console.log(`Initializing InterComp for station: ${config.station_name}`);
+      logger.info(`Initializing InterComp for station: ${config.station_name}`);
       return new InterComp(
         config.controller_data_url,
         config.controller_sensor_url,
@@ -50,14 +51,12 @@ async function initializeController() {
         singleTires
       );
     } else {
-      console.warn(
-        `Unknown controller_id: ${config.controller_id} for station: ${config.station_name}`
-      );
+      logger.warn(`Unknown controller_id: ${config.controller_id} for station: ${config.station_name}`);
       return null; // Skip unknown controllers
     }
 
   } catch (err) {
-    console.error("Error initializing controllers:", err);
+    logger.error("Error initializing controllers:", err);
   }
 }
 
@@ -66,10 +65,10 @@ async function initializeController() {
  */
 async function stopController() {
   if (currentController && typeof currentController.stop === "function") {
-    console.log("Stopping the current controller...");
+    logger.info("Stopping the current controller...");
     await currentController.stop();
     currentController = null;
-    console.log("Current controller stopped.");
+    logger.info("Current controller stopped.");
   }
 }
 
@@ -77,14 +76,14 @@ async function stopController() {
  * Monitor configuration changes and restart controllers if necessary.
  */
 async function monitorConfiguration() {
-  console.log("Starting configuration monitoring...");
+  logger.info("Starting configuration monitoring...");
 
   setInterval(async () => {
     try {
       const isUpdated = await checkForConfigUpdates();
 
       if (isUpdated) {
-        console.log("Configuration change detected. Restarting controllers...");
+        logger.info("Configuration change detected. Restarting controllers...");
 
         // Stop the current controller
         await stopController();
@@ -93,15 +92,15 @@ async function monitorConfiguration() {
         currentController = await initializeController();
 
         if (currentController) {
-          console.log("New controller initialized successfully.");
+          logger.info("New controller initialized successfully.");
         } else {
-          console.warn("No controller initialized. Configuration may be invalid.");
+          logger.warn("No controller initialized. Configuration may be invalid.");
         }
       } else {
-        console.log("No configuration changes detected.");
+        logger.debug("No configuration changes detected.");
       }
     } catch (err) {
-      console.error("Error monitoring configuration updates:", err);
+      logger.error("Error monitoring configuration updates:", err);
     }
   }, 5000); // Check for updates every 5 seconds
 }
@@ -111,20 +110,27 @@ async function monitorConfiguration() {
  */
 (async () => {
   try {
-    console.log("Initializing application...");
+    logger.info("Initializing application...");
+
+    const pool = require("./config/db");
+    if (pool.dbInitializedPromise) {
+      logger.info("Waiting for database schema checks to complete...");
+      await pool.dbInitializedPromise;
+      logger.info("Database schema checks completed.");
+    }
 
     // Initial controller setup
     currentController = await initializeController();
 
     if (currentController) {
-      console.log("Initial controller setup completed successfully.");
+      logger.info("Initial controller setup completed successfully.");
     } else {
-      console.warn("No valid controller initialized at startup.");
+      logger.warn("No valid controller initialized at startup.");
     }
 
     // Start monitoring configuration updates
     monitorConfiguration();
   } catch (err) {
-    console.error("Error during application initialization:", err);
+    logger.error("Error during application initialization:", err);
   }
 })();

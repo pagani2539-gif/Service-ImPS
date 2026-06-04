@@ -4,6 +4,7 @@ const path = require("path");
 const schedule = require("node-schedule");
 const pool = require("../config/db");
 const dayjs = require("dayjs");
+const { getConfiguration } = require("./configurationService");
 const snapshotsDir = path.join(__dirname, "../../public/snapshots");
 
 /**
@@ -24,13 +25,22 @@ const removeDirectoryAsync = async (dirPath) => {
  * Clean up snapshots older than retention period (Non-blocking)
  */
 const removeOldFolders = async () => {
-  const retentionDays = 3;
+  let retentionDays = 3;
+  try {
+    const config = await getConfiguration();
+    if (config && config.retention_days != null) {
+      retentionDays = Number(config.retention_days);
+    }
+  } catch (err) {
+    console.error("[Cleanup] Failed to fetch retention_days from database, using default (3):", err.message);
+  }
+
   // Calculate threshold: anything BEFORE 00:00:00.000 of (today - (retentionDays-1))
   // e.g. Today is 22nd. Retention 3 days means keep 22, 21, 20. Delete 19 and older.
   const thresholdDate = dayjs().startOf('day').subtract(retentionDays - 1, 'day');
   const thresholdTimestamp = thresholdDate.toDate();
 
-  console.log(`[Cleanup] Starting cleanup. Threshold: ${thresholdDate.format('YYYY-MM-DD')}`);
+  console.log(`[Cleanup] Starting cleanup. Threshold: ${thresholdDate.format('YYYY-MM-DD')} (Retention: ${retentionDays} days)`);
 
   if (!fsSync.existsSync(snapshotsDir)) {
     console.error("[Cleanup] Snapshots directory does not exist.");

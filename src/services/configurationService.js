@@ -5,6 +5,9 @@ let lastUpdatedAt;
 
 (async () => {
   try {
+    if (pool.dbInitializedPromise) {
+      await pool.dbInitializedPromise;
+    }
     lastUpdatedAt = await getLatestUpdatedAt();
   } catch (error) {
     console.error("Error initializing lastUpdatedAt:", error);
@@ -47,6 +50,8 @@ async function getConfiguration() {
           c.led_enabled,
           c.wheelbase_bus,
           c.vehicle_length_ignored,
+          c.retention_days,
+          c.straddling_time_diff,
           -- Subquery for streaming_urls
           (SELECT JSON_ARRAYAGG(JSON_OBJECT('url', su.url))
           FROM streaming_urls su

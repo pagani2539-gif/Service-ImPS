@@ -14,7 +14,7 @@ function isCrossingLaneWarning(data) {
     if (data.axles[0].weightLeft == 0 || data.axles[0].weightRight == 0)
       value = true;
 
-  if (value) data.warningFlags = 27;
+  if (value) data.warningFlags = (1 << 27);
   return data;
 }
 function convertDataTimeToMillisecond(dateTime) {
@@ -69,12 +69,71 @@ function mapWarningFlag(data) {
     .map((elm, idx) => (elm == 1 ? idx : ""))
     .filter(String);
   const filtered_warning = arr_index_warning.filter((value) =>
-    // [4, 9, 10].includes(value)
-    [4, 10].includes(value)
+    [4, 10, 27].includes(value)
   );
   data.warningFlag = filtered_warning;
   data.isWarningFlagged = filtered_warning.length > 0;
   return data;
+}
+
+/**
+ * รวมน้ำหนักรถ 2 คันที่วิ่งคร่อมเลน
+ */
+function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
+  if (vehicleLeft.axles.length !== vehicleRight.axles.length) {
+    console.error("Cannot merge: Axle counts do not match.");
+    return null;
+  }
+
+  // กำหนดว่าฝั่งไหนอยู่ซ้าย ฝั่งไหนอยู่ขวา ตามหมายเลขเลน
+  let leftPart = vehicleLeft;
+  let rightPart = vehicleRight;
+  if (vehicleLeft.lane > vehicleRight.lane) {
+    leftPart = vehicleRight;
+    rightPart = vehicleLeft;
+  }
+
+  let mergedData = { ...leftPart };
+  let totalGvw = 0;
+  let totalLeftWeight = 0;
+  let totalRightWeight = 0;
+
+  mergedData.axles = leftPart.axles.map((axleL, index) => {
+    const axleR = rightPart.axles[index];
+    // เพื่อรองรับการวิ่งคร่อมเลนในทุกรูปแบบ (ไม่ว่าจะเบียดซ้าย/ขวา หรือทับเซ็นเซอร์ฝั่งใดของเลน)
+    // - ล้อฝั่งซ้ายของรถจะกดทับเซ็นเซอร์ในเลนซ้าย (leftPart) ทั้งหมด (ซ้าย + ขวา)
+    // - ล้อฝั่งขวาของรถจะกดทับเซ็นเซอร์ในเลนขวา (rightPart) ทั้งหมด (ซ้าย + ขวา)
+    const newWeightLeft = axleL.weightLeft + axleL.weightRight;
+    const newWeightRight = axleR.weightLeft + axleR.weightRight;
+    const newAxleWeight = newWeightLeft + newWeightRight;
+
+    totalLeftWeight += newWeightLeft;
+    totalRightWeight += newWeightRight;
+    totalGvw += newAxleWeight;
+
+    return {
+      ...axleL,
+      weightLeft: newWeightLeft,
+      weightRight: newWeightRight,
+      weight: newAxleWeight,
+      speedLeft: axleL.speedLeft,
+      speedRight: axleR.speedRight,
+    };
+  });
+
+  mergedData.gvw = totalGvw;
+  mergedData.leftWeight = totalLeftWeight;
+  mergedData.rightWeight = totalRightWeight;
+  
+  mergedData.licensePlate = vehicleLeft.licensePlate || vehicleRight.licensePlate || "";
+  mergedData.platePath = vehicleLeft.platePath || vehicleRight.platePath || "";
+  mergedData.overviewPath = vehicleLeft.overviewPath || vehicleRight.overviewPath || "";
+  mergedData.cropPath = vehicleLeft.cropPath || vehicleRight.cropPath || "";
+  mergedData.province = vehicleLeft.province || vehicleRight.province || "";
+  
+  mergedData.isStraddlingMerged = true;
+
+  return mergedData;
 }
 function mapErrorFlag(data) {
   const errorFlag = data.errorFlags;
@@ -87,12 +146,19 @@ function mapErrorFlag(data) {
   return data;
 }
 function setSingleTire(data, singleTires) {
+  if (!singleTires || !Array.isArray(singleTires)) {
+    return data;
+  }
   const vehicleClass = singleTires.find(
     (item) => item.vehicle_class_id === data.vehicleClassID
   );
-  vehicleClass.axle_positions.forEach((element) => {
-    data.axles[element].dualTire = false;
-  });
+  if (vehicleClass && Array.isArray(vehicleClass.axle_positions)) {
+    vehicleClass.axle_positions.forEach((element) => {
+      if (data.axles && data.axles[element]) {
+        data.axles[element].dualTire = false;
+      }
+    });
+  }
   return data;
 }
 
@@ -587,5 +653,6 @@ module.exports = {
   isBusByWheelbase,
   isCrossingLaneWarning,
   convertDataTimeToMillisecond,
-  isIgnoredLength
+  isIgnoredLength,
+  mergeStraddlingVehicles
 };

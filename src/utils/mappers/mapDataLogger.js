@@ -115,12 +115,19 @@ function setViolation(data, vehiclesClass,exemptClassIDs = []) {
 }
 
 function setSingleTire(data, singleTires) {
+  if (!singleTires || !Array.isArray(singleTires)) {
+    return data;
+  }
   const vehicleClass = singleTires.find(
     (item) => item.vehicle_class_id === data.vehicleClassID
   );
-  vehicleClass.axle_positions.forEach((element) => {
-    data.axles[element].dualTire = false;
-  });
+  if (vehicleClass && Array.isArray(vehicleClass.axle_positions)) {
+    vehicleClass.axle_positions.forEach((element) => {
+      if (data.axles && data.axles[element]) {
+        data.axles[element].dualTire = false;
+      }
+    });
+  }
   return data;
 }
 
@@ -494,20 +501,30 @@ function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
     return null;
   }
 
-  // ใช้โครงสร้างของ vehicleLeft เป็นฐาน (หรือเลือกคันที่สมบูรณ์กว่า)
-  let mergedData = { ...vehicleLeft };
+  // กำหนดว่าฝั่งไหนอยู่ซ้าย ฝั่งไหนอยู่ขวา ตามหมายเลขเลน
+  let leftPart = vehicleLeft;
+  let rightPart = vehicleRight;
+  if (vehicleLeft.lane > vehicleRight.lane) {
+    leftPart = vehicleRight;
+    rightPart = vehicleLeft;
+  }
+
+  // ใช้โครงสร้างของ leftPart เป็นฐาน (หรือเลือกคันที่สมบูรณ์กว่า)
+  let mergedData = { ...leftPart };
   
   let totalGvw = 0;
   let totalLeftWeight = 0;
   let totalRightWeight = 0;
 
   // วนลูปเพื่อรวมน้ำหนักแต่ละเพลา
-  mergedData.axles = vehicleLeft.axles.map((axleL, index) => {
-    const axleR = vehicleRight.axles[index];
+  mergedData.axles = leftPart.axles.map((axleL, index) => {
+    const axleR = rightPart.axles[index];
     
-    // รวมน้ำหนักซ้ายจากคันซ้าย และขวาจากคันขวา
-    const newWeightLeft = axleL.weightLeft;
-    const newWeightRight = axleR.weightRight;
+    // เพื่อรองรับการวิ่งคร่อมเลนในทุกรูปแบบ (ไม่ว่าจะเบียดซ้าย/ขวา หรือทับเซ็นเซอร์ฝั่งใดของเลน)
+    // - ล้อฝั่งซ้ายของรถจะกดทับเซ็นเซอร์ในเลนซ้าย (leftPart) ทั้งหมด (ซ้าย + ขวา)
+    // - ล้อฝั่งขวาของรถจะกดทับเซ็นเซอร์ในเลนขวา (rightPart) ทั้งหมด (ซ้าย + ขวา)
+    const newWeightLeft = axleL.weightLeft + axleL.weightRight;
+    const newWeightRight = axleR.weightLeft + axleR.weightRight;
     const newAxleWeight = newWeightLeft + newWeightRight;
 
     totalLeftWeight += newWeightLeft;
@@ -530,8 +547,13 @@ function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
   mergedData.leftWeight = totalLeftWeight;
   mergedData.rightWeight = totalRightWeight;
   
-  // ล้างค่า Path รูปภาพหรือป้ายทะเบียนเพื่อให้ระบบไป Process ใหม่
-  mergedData.licensePlate = ""; 
+  // เก็บป้ายทะเบียนและรูปภาพจากฝั่งที่หาเจอ (ถ้ามี)
+  mergedData.licensePlate = vehicleLeft.licensePlate || vehicleRight.licensePlate || "";
+  mergedData.platePath = vehicleLeft.platePath || vehicleRight.platePath || "";
+  mergedData.overviewPath = vehicleLeft.overviewPath || vehicleRight.overviewPath || "";
+  mergedData.cropPath = vehicleLeft.cropPath || vehicleRight.cropPath || "";
+  mergedData.province = vehicleLeft.province || vehicleRight.province || "";
+  
   mergedData.isStraddlingMerged = true; // flag ไว้ว่าเกิดจากการรวมข้อมูล
 
   return mergedData;

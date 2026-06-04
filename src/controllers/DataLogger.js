@@ -51,6 +51,7 @@ class DataLogger extends WSController {
   ) {
     super(dataWsUrl, triggerWsUrl, reconnectInterval);
     this.straddlingBuffer = new Map(); // ใช้สำหรับพักข้อมูลรถรอ Merge (Key: LicensePlate)
+    this.lastTriggerTimes = new Map(); // ใช้สำหรับบันทึกเวลาที่ได้รับ Trigger ล่าสุดแต่ละเลน (Key: lane, Value: timestamp)
     this.config = config;
     // Initialize SnapshotManager for LPR and Overview
     this.lprSnapshotManager = new SnapshotManager(
@@ -84,14 +85,27 @@ class DataLogger extends WSController {
 
   // ฟังก์ชันสำหรับค้นหาและประมวลผล snapshots
   async findAndProcessSnapshots(mappedData, existingLpr = null, existingOverview = null) {
+    const lane = normalizeLane(mappedData.lane);
+    const lastTrigger = this.lastTriggerTimes.get(lane);
+    const hasRecentTrigger = lastTrigger && (Date.now() - lastTrigger <= 15000); // 15 seconds window
+
     // 1. เริ่มค้นหาเฉพาะส่วนที่ยังไม่มีข้อมูล (รองรับการ Retry)
     // Smart Retry: ถ้ามี snapshot เดิมที่เคยหาเจอแล้วแต่ upload พลาด ให้ใช้ใบเดิม
+    // หากไม่มีประวัติการ Trigger ล่าสุด (hasRecentTrigger เป็น false) ให้ใช้ _findSnapshotOnce เพื่อเช็คทันทีแบบไม่มีดีเลย์
     const lprSearchPromise = !mappedData.platePath 
-      ? (existingLpr ? Promise.resolve(existingLpr) : this.lprSnapshotManager.findSnapshots(mappedData, "lpr"))
+      ? (existingLpr 
+          ? Promise.resolve(existingLpr) 
+          : (hasRecentTrigger 
+              ? this.lprSnapshotManager.findSnapshots(mappedData, "lpr") 
+              : this.lprSnapshotManager._findSnapshotOnce(mappedData, "lpr")))
       : Promise.resolve(null);
       
     const overviewSearchPromise = !mappedData.overviewPath
-      ? (existingOverview ? Promise.resolve(existingOverview) : this.overviewSnapshotManager.findSnapshots(mappedData, "overview"))
+      ? (existingOverview 
+          ? Promise.resolve(existingOverview) 
+          : (hasRecentTrigger 
+              ? this.overviewSnapshotManager.findSnapshots(mappedData, "overview") 
+              : this.overviewSnapshotManager._findSnapshotOnce(mappedData, "overview")))
       : Promise.resolve(null);
 
     let lprSnapshotsFound = existingLpr;
@@ -99,12 +113,26 @@ class DataLogger extends WSController {
 
     // 2. จัดการส่วน LPR
     const lprProcessPromise = lprSearchPromise.then(async (lprSnapshots) => {
-      if (!lprSnapshots) return null;
-      lprSnapshotsFound = lprSnapshots;
+      let activeLprSnapshots = lprSnapshots;
+
+      // Fallback: If no pre-triggered LPR snapshot is found, take a live snapshot on-demand
+      if (!activeLprSnapshots && !mappedData.platePath) {
+        const lane = normalizeLane(mappedData.lane);
+        console.log(`[Snapshot Fallback] LPR snapshot not found. Triggering on-demand snapshot for lane ${lane}...`);
+        const lprSnapshotConfig = this.config.capture_lpr.find(
+          (item) => normalizeLane(item.lane) === lane
+        );
+        if (lprSnapshotConfig) {
+          activeLprSnapshots = await this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, { stamp: new Date(), lane, type: "lpr" });
+        }
+      }
+
+      if (!activeLprSnapshots) return null;
+      lprSnapshotsFound = activeLprSnapshots;
 
       const [ocrResult, lprUploadResult] = await Promise.all([
-        ocrService.sendToOCR(lprSnapshots, this.config.ocr_url),
-        this.lprSnapshotManager.uploadImage(lprSnapshots.imageUrl, "lpr")
+        ocrService.sendToOCR(activeLprSnapshots, this.config.ocr_url),
+        this.lprSnapshotManager.uploadImage(activeLprSnapshots.imageUrl, "lpr")
       ]);
 
       if (ocrResult) {
@@ -125,18 +153,32 @@ class DataLogger extends WSController {
         // กรณีอ่าน OCR ไม่ได้ (การคัดกรองรถบัสด้วยฐานล้อถูกทำไปแล้วที่ handleDataMessage)
         if (lprUploadResult.success) mappedData.platePath = lprUploadResult.data.fileUrl;
       }
-      return { exclude: false, snapshots: lprSnapshots };
+      return { exclude: false, snapshots: activeLprSnapshots };
     });
 
     // 3. จัดการส่วน Overview
     const overviewProcessPromise = overviewSearchPromise.then(async (overviewSnapshots) => {
-      if (!overviewSnapshots) return null;
-      overviewSnapshotsFound = overviewSnapshots;
-      const uploadResult = await this.overviewSnapshotManager.uploadImage(overviewSnapshots.imageUrl, "overview");
+      let activeOverviewSnapshots = overviewSnapshots;
+
+      // Fallback: If no pre-triggered Overview snapshot is found, take a live snapshot on-demand
+      if (!activeOverviewSnapshots && !mappedData.overviewPath) {
+        const lane = normalizeLane(mappedData.lane);
+        console.log(`[Snapshot Fallback] Overview snapshot not found. Triggering on-demand snapshot for lane ${lane}...`);
+        const overviewSnapshotConfig = this.config.capture_overview.find(
+          (item) => normalizeLane(item.lane) === lane
+        );
+        if (overviewSnapshotConfig) {
+          activeOverviewSnapshots = await this.overviewSnapshotManager.takeSnapshot(overviewSnapshotConfig.snap_code, { stamp: new Date(), lane, type: "overview" });
+        }
+      }
+
+      if (!activeOverviewSnapshots) return null;
+      overviewSnapshotsFound = activeOverviewSnapshots;
+      const uploadResult = await this.overviewSnapshotManager.uploadImage(activeOverviewSnapshots.imageUrl, "overview");
       if (uploadResult.success) {
         mappedData.overviewPath = uploadResult.data.fileUrl;
       }
-      return overviewSnapshots;
+      return activeOverviewSnapshots;
     });
 
     const [lprRes, overviewRes] = await Promise.all([lprProcessPromise, overviewProcessPromise]);
@@ -186,28 +228,22 @@ class DataLogger extends WSController {
         }
       }
       
-      const findResult = await this.findAndProcessSnapshots(mappedData);
-
-      if (findResult.isExcluded) {
-        console.warn(`[Filter] Vehicle excluded from processing (ID: ${ID}).`);
-        return;
-      }
-
       // 1. ตรวจสอบเงื่อนไข Straddling (Warning 9 หรือ 10)
       const isStraddling = mappedData.warningFlag.includes(9) || mappedData.warningFlag.includes(10);
       if (isStraddling) {
-        const plateKey = mappedData.licensePlate;
         const currentTime = dayjs(mappedData.stamp);
         let matchFound = false;
 
-        // ค้นหาคู่ใน Buffer
+        const maxDiff = this.config.straddling_time_diff || 3;
+
+        // ค้นหาคู่ใน Buffer (เทียบเวลา + จำนวนเพลา)
         for (let [key, bufferedVehicle] of this.straddlingBuffer) {
           const bufferedTime = dayjs(bufferedVehicle.data.stamp);
           const timeDiff = Math.abs(currentTime.diff(bufferedTime, 'second'));
 
-          // ถ้าทะเบียนตรงกัน และห่างกันไม่เกิน 3 วินาที
-          if (plateKey && plateKey === key && timeDiff <= 2) {
-            console.log(`[Straddling] Match found! Merging plate: ${plateKey}`);
+          // เงื่อนไข: เวลาห่างกันไม่เกิน 3 วินาที และจำนวนเพลาเท่ากัน
+          if (timeDiff <= maxDiff && bufferedVehicle.data.axles.length === mappedData.axles.length) {
+            console.log(`[Straddling] Match found! Merging vehicles (Time Diff: ${timeDiff}s, Axles: ${mappedData.axles.length})`);
             clearTimeout(bufferedVehicle.timeoutHandle);
             let merged = mergeStraddlingVehicles(bufferedVehicle.data, mappedData);
             if (merged) {
@@ -220,30 +256,37 @@ class DataLogger extends WSController {
         }
 
         if (!matchFound) {
-          if (plateKey && plateKey !== "") {
-            const timeoutHandle = setTimeout(async () => {
-              const pending = this.straddlingBuffer.get(plateKey);
-              if (pending) {
-                this.straddlingBuffer.delete(plateKey);
-                await this.processFinalVehicle(pending.data);
-              }
-            }, 3000); 
+          // ใช้ key ที่ไม่ซ้ำกันสำหรับ Buffer
+          const bufferKey = `straddle_${mappedData.lane}_${mappedData.stamp.getTime()}`;
+          const timeoutHandle = setTimeout(async () => {
+            const pending = this.straddlingBuffer.get(bufferKey);
+            if (pending) {
+              this.straddlingBuffer.delete(bufferKey);
+              await this.processFinalVehicle(pending.data);
+            }
+          }, maxDiff * 1000); 
 
-            this.straddlingBuffer.set(plateKey, {
-              data: mappedData,
-              timeoutHandle: timeoutHandle
-            });
-            return; // หยุดรอคันที่สอง
-          }
+          this.straddlingBuffer.set(bufferKey, {
+            data: mappedData,
+            timeoutHandle: timeoutHandle
+          });
+          return; // หยุดรอคู่ของมัน
         }
       }
 
       sendToVMS(this.config.led_url, mappedData);
 
+      // Perform initial snapshot search, OCR and upload BEFORE database insert
+      const findResult = await this.findAndProcessSnapshots(mappedData);
+
+      if (findResult && findResult.isExcluded) {
+        console.warn(`[Filter] Vehicle is excluded by plate (Passenger car/Bus). Skipping insert.`);
+        return;
+      }
+
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
 
-      // 3D process ...
       if (threeDimensionBase) {
         try {
           const threeDimensionData = await getThreeDimension(threeDimensionBase, mappedData, vehicleID);
@@ -251,34 +294,85 @@ class DataLogger extends WSController {
         } catch (err) { console.error("Error processing threeDimension:", err); }
       }
 
-      sendToWebSocket({ vehicleID: vehicleID });
-      sendToTransmission(transmissionUrl, { vehicleID: vehicleID });
+      let hasTransmitted = false;
 
-      // Retry Logic: ถ้ารูปยังไม่ครบ และไม่ใช่รถที่ถูกคัดออก
-      if (!mappedData.overviewPath || !mappedData.platePath) {
-        console.warn(`Missing images for Vehicle ID: ${vehicleID}. Retrying in 2s...`);
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        
-        // Smart Retry: ส่ง Snapshot ที่เคยหาเจอแล้ว (แต่ upload พลาด) เข้าไปลองใหม่ด้วย
-        const retryResult = await this.findAndProcessSnapshots(
-          mappedData, 
-          findResult.lprSnapshots, 
-          findResult.overviewSnapshots
-        );
-        if (retryResult.isExcluded) return;
+      // Only transmit initial data if both images are present
+      if (mappedData.overviewPath && mappedData.platePath) {
+        // Add 500ms delay to prevent race condition of browser requesting image before server disk write
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        sendToWebSocket({ vehicleID });
+        sendToTransmission(transmissionUrl, { vehicleID });
+        hasTransmitted = true;
+      }
 
-        if (mappedData.overviewPath) await updateOverview(vehicleID, mappedData.overviewPath);
-        if (mappedData.platePath) {
-          await updatePlates(vehicleID, mappedData.licensePlate, mappedData.platePath, mappedData.province, mappedData.cropPath);
-        }
-        
-        if (mappedData.overviewPath || mappedData.platePath) {
-          sendToWebSocket({ vehicleID: vehicleID });
-          sendToTransmission(transmissionUrl, { vehicleID: vehicleID });
-        }
+      if (!hasTransmitted) {
+        this.processImagesRetryInBackground(vehicleID, mappedData, findResult).catch((err) => {
+          console.error("Error in background image/OCR processing retry:", err);
+        });
       }
     } catch (err) {
       console.error("DataLogger error handling data message:", err);
+    }
+  }
+
+  /**
+   * Process LPR/Overview images retry in the background if they were missing initially.
+   */
+  async processImagesRetryInBackground(vehicleID, mappedData, findResult) {
+    try {
+      const maxRetries = 3;
+      const retryDelayMs = 5000;
+      let attempt = 0;
+      let hasTransmitted = false;
+
+      while (attempt < maxRetries && (!mappedData.overviewPath || !mappedData.platePath)) {
+        attempt++;
+        console.log(`[Background Retry] Missing images for Vehicle ID: ${vehicleID}. Retrying in ${(retryDelayMs * attempt / 1000).toFixed(0)}s... (Attempt ${attempt}/${maxRetries})`);
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+
+        const retryResult = await this.findAndProcessSnapshots(
+          mappedData,
+          findResult ? findResult.lprSnapshots : null,
+          findResult ? findResult.overviewSnapshots : null
+        );
+
+        if (retryResult && retryResult.isExcluded) {
+          console.warn(`[Background Retry] Vehicle ID: ${vehicleID} is excluded by plate on retry. Deleting record...`);
+          await pool.execute("DELETE FROM axles WHERE vehicle_id = ?", [vehicleID]);
+          await pool.execute("DELETE FROM axles_after_allowance WHERE vehicle_id = ?", [vehicleID]);
+          await pool.execute("DELETE FROM plates WHERE vehicle_id = ?", [vehicleID]);
+          await pool.execute("DELETE FROM images WHERE vehicle_id = ?", [vehicleID]);
+          await pool.execute("DELETE FROM flags WHERE vehicle_id = ?", [vehicleID]);
+          await pool.execute("DELETE FROM vehicles WHERE id = ?", [vehicleID]);
+          return;
+        }
+
+        if (mappedData.overviewPath) {
+          await updateOverview(vehicleID, mappedData.overviewPath);
+        }
+        if (mappedData.platePath) {
+          await updatePlates(vehicleID, mappedData.licensePlate, mappedData.platePath, mappedData.province, mappedData.cropPath);
+        }
+
+        // If we got both images now, transmit and break out of retry loop
+        if (mappedData.overviewPath && mappedData.platePath) {
+          // Add 500ms delay to prevent race condition of browser requesting image before server disk write
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          sendToWebSocket({ vehicleID });
+          sendToTransmission(transmissionUrl, { vehicleID });
+          hasTransmitted = true;
+          break;
+        }
+      }
+
+      // If we still haven't transmitted (retries exhausted, but some images may still be missing/null), send anyway to prevent data loss
+      if (!hasTransmitted) {
+        console.log(`[Background Retry] Retries exhausted for Vehicle ID: ${vehicleID}. Transmitting weight data with missing images.`);
+        sendToWebSocket({ vehicleID });
+        sendToTransmission(transmissionUrl, { vehicleID });
+      }
+    } catch (err) {
+      console.error(`[Background Retry] Error processing images and OCR for vehicle ${vehicleID}:`, err);
     }
   }
 
@@ -287,10 +381,31 @@ class DataLogger extends WSController {
     try {
       console.log(`[Straddling] Processing single part for ID: ${mappedData.id} (No partner found)`);
       sendToVMS(this.config.led_url, mappedData);
+
+      // Perform initial snapshot search and OCR
+      const findResult = await this.findAndProcessSnapshots(mappedData);
+
+      if (findResult && findResult.isExcluded) {
+        console.warn(`[Straddling] Vehicle is excluded by plate. Skipping insert.`);
+        return;
+      }
+
       const vehicleID = await insertVehicleWithDetails(mappedData);
-      sendToWebSocket({ vehicleID: vehicleID });
-      sendToTransmission(transmissionUrl, { vehicleID: vehicleID });
       console.log(`[Straddling] Single part saved successfully for Vehicle ID: ${vehicleID}`);
+
+      let hasTransmitted = false;
+      if (mappedData.overviewPath && mappedData.platePath) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        sendToWebSocket({ vehicleID });
+        sendToTransmission(transmissionUrl, { vehicleID });
+        hasTransmitted = true;
+      }
+
+      if (!hasTransmitted) {
+        this.processImagesRetryInBackground(vehicleID, mappedData, findResult).catch((err) => {
+          console.error("Error in background retry loop for final vehicle:", err);
+        });
+      }
     } catch (err) {
       console.error("Error in processFinalVehicle:", err);
     }
@@ -309,6 +424,7 @@ class DataLogger extends WSController {
       if (rawTriggerData.data.TriggerType === "Start") {
         try {
           const lane = normalizeLane(channelId);
+          this.lastTriggerTimes.set(lane, Date.now());
           const lprSnapshotConfig = this.config.capture_lpr.find(
             (item) => normalizeLane(item.lane) === lane
           );

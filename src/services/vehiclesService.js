@@ -77,7 +77,7 @@ async function insertPlates(
 }
 
 async function updatePlates(vehicleID, licensePlate, platePath, province, cropPath) {
-  const result = await pool.query(
+  const [result] = await pool.query(
     `UPDATE plates
      SET license_plate = ?, plate_path = ?, province = ?, crop_path = ?
      WHERE vehicle_id = ?`,
@@ -97,7 +97,7 @@ async function insertOverview(vehicleID, image) {
   );
 }
 async function updateOverview(vehicleID, image) {
-  const result = await pool.query(
+  const [result] = await pool.query(
     `UPDATE images 
      SET path = ?, url = ?
      WHERE vehicle_id = ?`,

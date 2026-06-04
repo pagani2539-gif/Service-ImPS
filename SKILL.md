@@ -20,16 +20,17 @@ The system supports two primary hardware controllers: **DataLogger** and **Inter
 Every weighing event follows a strict path:
 1. **Trigger:** Hardware sensor detects a vehicle.
 2. **Collection:** Controller fetches weight, axles, and dimensions.
-3. **Enhancement:** `vehiclesService` and `threeDimensionService` add metadata.
-4. **Recording:** `DataLogger` or `InterComp` saves the record to the database.
-5. **Transmission:** `transmissionService` sends data to external APIs, and `wsService` broadcasts to connected clients.
+3. **Enhancement:** `picoService` (wheel classification) and `threeDimensionService` (vehicle dimensions) fetch metadata.
+4. **Recording:** `DataLogger` or `InterComp` saves the vehicle details and axle records to the database. If a hardware trigger fails (no snapshot found in the memory registry), a software fallback automatically requests live LPR and Overview snapshots from the cameras on-demand before finalizing the database record.
+5. **Transmission:** The system immediately broadcasts the saved `vehicleID` via WebSocket (`wsService`) and sends it to central servers via HTTP (`transmissionService`).
+6. **Visual Integration:** In the background, `SnapshotManager` claims matching snapshots, sends them to `ocrService` to read license plates, crops the plates using `sharp`, uploads them to central image hosting, and updates the database record. Once done, a final transmission/broadcast is sent with the updated plate details.
 - **Action:** If data is missing in the central system, check `transmissionService.js` for API response logs and the local DB for the initial record.
 
 ### 3. Visual Processing (OCR & Snapshots)
 - **OCR:** Handled by `src/utils/ocrService.js`. It processes snapshots to extract license plate numbers.
-- **Snapshot Management:** Managed by `src/utils/snapshotManager.js` and `snapshotRegistry.js`.
-- **Cleanup:** `src/services/snapshotCleanupService.js` runs a midnight job to delete old snapshots and clear database records to save space.
-- **Action:** To adjust storage retention, modify the `CLEANUP_THRESHOLD` or similar constants in the cleanup service.
+- **Snapshot Management:** Managed by `src/utils/snapshotManager.js` and `snapshotRegistry.js`. If a pre-triggered snapshot is missing due to hardware trigger failure, the system falls back to fetching live camera snapshots on-demand.
+- **Cleanup:** `src/services/snapshotCleanupService.js` runs a midnight job to delete old snapshots from disk and clear database records to save space.
+- **Action:** To adjust storage retention, modify the `retention_days` column in the `configuration` database table, which is read dynamically during cleanup.
 
 ### 4. Dynamic Configuration Polling
 The system does not require a manual restart for configuration changes.
@@ -37,7 +38,18 @@ The system does not require a manual restart for configuration changes.
 - **Restart Flow:** If a change is detected, `app.js` stops the current controller and re-initializes with the new settings.
 - **Action:** When making configuration changes, apply them directly to the `configurations` table in the database and wait for the system to auto-restart.
 
+### 5. 3D Dimension Scanner Integration
+- **Mechanism:** `src/services/threeDimensionService.js` polls `THREE_DIMENSION_BASE/report-3d/transaction` using a time window of `±5 minutes` around the vehicle's weigh-in time.
+- **Matching:** Normalizes the license plate string (removes special characters and symbols) to find the corresponding 3D record.
+- **Validation:** Compares the vehicle's scanned height against `THREE_DIMENSION_MAXIMUM_HEIGHT`. If it exceeds the limit, it flags `is_over_height` and registers warning code `1` in `three_dimension_warning_map`.
+
+### 6. Pico Tire Classification Integration
+- **Mechanism:** `src/services/picoService.js` calls the Pico REST endpoint (`PICO_BASE/wheel-type`) for Lane 1 vehicles.
+- **Parameters:** It requests details for Channel A with a search window of `[StartTime - 500ms, EndTime + 500ms]` based on the vehicle's detection timestamps.
+- **Recording:** Stores whether axles use single or dual tire configurations (`dual_tire` column in the `axles` table).
+
 ## Technical References
 - **Configuration Mapping:** See `src/utils/mappers/mapConfigurationKeys.js`.
 - **Database Schema:** Reference `src/config/db.js` for connection details and existing SQL scripts in `docs/sql/`.
 - **Logs:** Monitor PM2 logs (if running in prod) or the console for "Configuration change detected" messages.
+- **Trigger Fallback Workflow:** Detailed in `src/controllers/DataLogger.js` and `src/controllers/InterComp.js`. If a hardware trigger isn't logged in `lastTriggerTimes` in the last 15 seconds, the search calls `_findSnapshotOnce` instantly to bypass the 5-second match delay and fires an on-demand fallback snapshot immediately.

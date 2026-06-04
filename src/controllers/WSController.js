@@ -12,6 +12,10 @@ class WSController {
     this.triggerSocket = null;
     this.shouldReconnect = true; // ตัวแปรควบคุม reconnect
 
+    // Backoff state variables
+    this.dataAttempts = 0;
+    this.triggerAttempts = 0;
+    this.maxReconnectInterval = 60000; // Max reconnect wait time is 60 seconds
 
     this.initDataSocket();
     this.initTriggerSocket();
@@ -22,6 +26,7 @@ class WSController {
 
     this.dataSocket.on("open", () => {
       console.log(new Date(), `${this.constructor.name} Data WebSocket Connected`);
+      this.dataAttempts = 0; // Reset attempts on success
     });
 
     this.dataSocket.on("error", (err) => {
@@ -33,7 +38,15 @@ class WSController {
     this.dataSocket.on("close", () => {
       console.log(new Date(), `${this.constructor.name} Data WebSocket Closed`);
       if (this.shouldReconnect) {
-        setTimeout(() => this.initDataSocket(), this.reconnectInterval);
+        this.dataAttempts++;
+        const initialDelay = 5000; // Start at 5 seconds
+        const nextDelay = Math.min(
+          initialDelay * Math.pow(2, this.dataAttempts - 1),
+          this.reconnectInterval,
+          this.maxReconnectInterval
+        );
+        console.log(`[WS] Reconnecting Data WebSocket in ${(nextDelay / 1000).toFixed(1)}s (Attempt ${this.dataAttempts})`);
+        setTimeout(() => this.initDataSocket(), nextDelay);
       }
     });
   }
@@ -43,6 +56,7 @@ class WSController {
 
     this.triggerSocket.on("open", () => {
       console.log(new Date(), `${this.constructor.name} Trigger WebSocket Connected`);
+      this.triggerAttempts = 0; // Reset attempts on success
     });
 
     this.triggerSocket.on("error", (err) => {
@@ -54,7 +68,15 @@ class WSController {
     this.triggerSocket.on("close", () => {
       console.log(new Date(), `${this.constructor.name} Trigger WebSocket Closed`);
       if (this.shouldReconnect) {
-        setTimeout(() => this.initTriggerSocket(), this.reconnectInterval);
+        this.triggerAttempts++;
+        const initialDelay = 5000; // Start at 5 seconds
+        const nextDelay = Math.min(
+          initialDelay * Math.pow(2, this.triggerAttempts - 1),
+          this.reconnectInterval,
+          this.maxReconnectInterval
+        );
+        console.log(`[WS] Reconnecting Trigger WebSocket in ${(nextDelay / 1000).toFixed(1)}s (Attempt ${this.triggerAttempts})`);
+        setTimeout(() => this.initTriggerSocket(), nextDelay);
       }
     });
   }

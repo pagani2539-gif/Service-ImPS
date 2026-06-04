@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IMPS Service - System Architecture & Technical Report</title>
+    <!-- Google Fonts: Prompt for Thai, Inter for English & Code -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            /* Sleek Dark Mode Color Palette (Futuristic Dashboard) */
+            --bg-main: #0B0F19;
+            --bg-panel: #151D30;
+            --bg-card: #1E2942;
+            --bg-input: #121824;
+            --border-color: #2E3C5E;
+            
+            --primary: #3B82F6;
+            --primary-hover: #2563EB;
+            --primary-glow: rgba(59, 130, 246, 0.35);
+            
+            --success: #10B981;
+            --success-glow: rgba(16, 185, 129, 0.25);
+            
+            --warning: #F59E0B;
+            --warning-glow: rgba(245, 158, 11, 0.25);
+            
+            --error: #EF4444;
+            --error-glow: rgba(239, 68, 68, 0.25);
+            
+            --text-title: #FFFFFF;
+            --text-main: #E2E8F0;
+            --text-muted: #94A3B8;
+            --text-highlight: #60A5FA;
+            
+            --transition-speed: 0.25s;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Prompt', 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        /* Container Layout */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        /* Header Styling */
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(135deg, #1E293B 0%, #0F172A 100%);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 2;
+        }
+
+        .header-title-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header-icon {
+            font-size: 2.5rem;
+            background: rgba(59, 130, 246, 0.15);
+            padding: 0.5rem;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            color: var(--text-title);
+            font-weight: 700;
+        }
+
+        header p {
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            font-size: 0.95rem;
+        }
+
+        .system-badge {
+            background-color: rgba(59, 130, 246, 0.2);
+            color: var(--text-highlight);
+            border: 1px solid rgba(59, 130, 246, 0.4);
+            padding: 0.35rem 0.75rem;
+            border-radius: 99px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            display: inline-block;
+            margin-top: 0.5rem;
+        }
+
+        /* Metrics Row */
+        .metrics-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .metric-card {
+            background-color: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+            transition: transform var(--transition-speed);
+        }
+
+        .metric-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--primary);
+        }
+
+        .metric-icon {
+            font-size: 2rem;
+            color: var(--text-highlight);
+            background-color: rgba(255, 255, 255, 0.05);
+            width: 50px;
+            height: 50px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .metric-info h3 {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-info p {
+            font-size: 1.1rem;
+            color: var(--text-title);
+            font-weight: 600;
+            margin-top: 0.15rem;
+        }
+
+        /* Dashboard Grid layout */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 350px 1fr;
+            gap: 2rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Sidebar Panels */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .panel {
+            background-color: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            color: var(--text-title);
+            margin-bottom: 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.75rem;
+        }
+
+        /* Status Indicators */
+        .status-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+        }
+
+        .status-label {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.95rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--text-muted);
+            display: inline-block;
+            position: relative;
+        }
+
+        .status-dot.active {
+            background-color: var(--success);
+            box-shadow: 0 0 10px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.idle {
+            background-color: var(--warning);
+            box-shadow: 0 0 10px var(--warning);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.3); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .status-value {
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .status-value.online { color: var(--success); }
+        .status-value.optional { color: var(--text-muted); }
+
+        /* Simulator Widget */
+        .sim-control {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .sim-control label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .sim-select {
+            background-color: var(--bg-input);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 0.65rem;
+            border-radius: 8px;
+            font-family: inherit;
+            outline: none;
+            cursor: pointer;
+            transition: border-color var(--transition-speed);
+        }
+
+        .sim-select:focus {
+            border-color: var(--primary);
+        }
+
+        .sim-btn {
+            background-color: var(--primary);
+            color: #FFFFFF;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background-color var(--transition-speed), transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .sim-btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .sim-btn:active {
+            transform: scale(0.98);
+        }
+
+        .console-log {
+            background-color: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.75rem;
+            font-family: 'Inter', monospace;
+            font-size: 0.8rem;
+            height: 220px;
+            overflow-y: auto;
+            color: #38BDF8;
+            white-space: pre-wrap;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.5);
+        }
+
+        /* Tabs System */
+        .tabs {
+            display: flex;
+            background-color: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 12px 12px 0 0;
+            overflow-x: auto;
+            padding: 0.5rem 0.5rem 0 0.5rem;
+        }
+
+        .tab-btn {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.85rem 1.5rem;
+            font-family: inherit;
+            font-weight: 500;
+            font-size: 0.95rem;
+            cursor: pointer;
+            border-radius: 8px 8px 0 0;
+            transition: color var(--transition-speed), background-color var(--transition-speed);
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-title);
+            background-color: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-btn.active {
+            color: var(--text-highlight);
+            background-color: var(--bg-card);
+            border-bottom: 2px solid var(--primary);
+            font-weight: 600;
+        }
+
+        /* Tab Content Panel */
+        .tab-content {
+            background-color: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-top: none;
+            border-radius: 0 0 16px 16px;
+            padding: 2rem;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+            min-height: 550px;
+        }
+
+        .tab-pane {
+            display: none;
+            animation: fadeIn 0.4s ease-out;
+        }
+
+        .tab-pane.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Technical Content Layout styles */
+        .section-header {
+            font-size: 1.3rem;
+            color: var(--text-title);
+            margin-bottom: 1.25rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .section-desc {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .feature-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: transform var(--transition-speed), border-color var(--transition-speed);
+        }
+
+        .feature-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+        }
+
+        .feature-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-title);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .feature-desc {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+        }
+
+        /* Flow Process Step-by-Step styles */
+        .flow-timeline {
+            position: relative;
+            padding-left: 2rem;
+            margin: 1.5rem 0;
+        }
+
+        .flow-timeline::before {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background-color: var(--border-color);
+        }
+
+        .flow-step {
+            position: relative;
+            margin-bottom: 1.75rem;
+        }
+
+        .flow-step:last-child {
+            margin-bottom: 0;
+        }
+
+        .flow-marker {
+            position: absolute;
+            left: -2rem;
+            top: 4px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: var(--bg-panel);
+            border: 3px solid var(--primary);
+            box-shadow: 0 0 8px var(--primary);
+        }
+
+        .flow-step.trigger .flow-marker { border-color: var(--error); box-shadow: 0 0 8px var(--error); }
+        .flow-step.processing .flow-marker { border-color: var(--warning); box-shadow: 0 0 8px var(--warning); }
+        .flow-step.save .flow-marker { border-color: var(--success); box-shadow: 0 0 8px var(--success); }
+
+        .flow-step-title {
+            font-size: 0.98rem;
+            font-weight: 600;
+            color: var(--text-title);
+            margin-bottom: 0.25rem;
+        }
+
+        .flow-step-desc {
+            font-size: 0.88rem;
+            color: var(--text-muted);
+        }
+
+        /* Database & Env Tables */
+        .data-table-container {
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            text-align: left;
+        }
+
+        th {
+            background-color: var(--bg-card);
+            color: var(--text-title);
+            font-weight: 600;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        td {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-main);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background-color: rgba(255, 255, 255, 0.02);
+        }
+
+        .code-style {
+            font-family: 'Inter', monospace;
+            color: var(--text-highlight);
+            background-color: rgba(0,0,0,0.2);
+            padding: 0.15rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+
+        /* Bullet lists custom styles */
+        .info-list {
+            list-style: none;
+        }
+
+        .info-list li {
+            position: relative;
+            padding-left: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .info-list li::before {
+            content: "•";
+            color: var(--primary);
+            font-size: 1.2rem;
+            position: absolute;
+            left: 0.5rem;
+            top: -2px;
+        }
+
+        /* Alert Callout */
+        .alert-callout {
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.1) 0%, transparent 100%);
+            border-left: 4px solid var(--primary);
+            padding: 1rem 1.25rem;
+            border-radius: 0 8px 8px 0;
+            margin-top: 1.5rem;
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            font-size: 0.9rem;
+        }
+
+        .alert-callout.warning {
+            background: linear-gradient(90deg, rgba(245, 158, 11, 0.1) 0%, transparent 100%);
+            border-left-color: var(--warning);
+        }
+
+        .alert-callout-icon {
+            font-size: 1.2rem;
+            line-height: 1;
+        }
+
+        .alert-callout-content p {
+            color: var(--text-main);
+        }
+        
+        .alert-callout-content strong {
+            color: var(--text-title);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <!-- Header -->
+    <header>
+        <div class="header-content">
+            <div class="header-title-wrapper">
+                <div class="header-icon">🚛</div>
+                <div>
+                    <h1>IMPS Service - รายงานสถาปัตยกรรมระบบ</h1>
+                    <p>ระบบบูรณาการด่านชั่งน้ำหนักย่อย (Intermediate Station Service) • สรุปสภาวะปัจจุบันและการประมวลผล</p>
+                </div>
+            </div>
+        </div>
+        <div style="text-align: right; z-index: 2;">
+            <div class="system-badge">Active Middleware</div>
+            <p style="font-size: 0.8rem; margin-top: 0.25rem;">Node.js Runtime Engine</p>
+        </div>
+    </header>
+
+    <!-- Top Status Metrics -->
+    <div class="metrics-row">
+        <div class="metric-card">
+            <div class="metric-icon">🔄</div>
+            <div class="metric-info">
+                <h3>โหมดการทำงาน</h3>
+                <p id="metric-controller">DataLogger WS Mode</p>
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-icon">💾</div>
+            <div class="metric-info">
+                <h3>ฐานข้อมูล</h3>
+                <p>MySQL (mysql2 pool)</p>
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-icon">📷</div>
+            <div class="metric-info">
+                <h3>จับคู่รูปภาพ</h3>
+                <p>Smart Time-window</p>
+            </div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-icon">🚀</div>
+            <div class="metric-info">
+                <h3>สถานะความเสถียร</h3>
+                <p>Auto-restart Config</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Grid Dashboard layout -->
+    <div class="dashboard-grid">
+        
+        <!-- Sidebar Panels (Left) -->
+        <div class="sidebar">
+            
+            <!-- Integration Status -->
+            <div class="panel">
+                <h2 class="panel-title">🔌 การเชื่อมต่อฮาร์ดแวร์ &amp; เซอร์วิส</h2>
+                <div class="status-list">
+                    <div class="status-item">
+                        <span class="status-label">
+                            <span class="status-dot active"></span>
+                            Weighing WebSocket
+                        </span>
+                        <span class="status-value online">เชื่อมต่อแล้ว</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">
+                            <span class="status-dot active"></span>
+                            OCR API Engine
+                        </span>
+                        <span class="status-value online">ออนไลน์</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">
+                            <span class="status-dot active"></span>
+                            3D Scanner API
+                        </span>
+                        <span class="status-value online">ออนไลน์</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">
+                            <span class="status-dot active"></span>
+                            Pico Tire API (Lane 1)
+                        </span>
+                        <span class="status-value online">ออนไลน์</span>
+                    </div>
+                    <div class="status-item">
+                        <span class="status-label">
+                            <span class="status-dot idle"></span>
+                            LED Display (VMS)
+                        </span>
+                        <span class="status-value">พร้อมทำงาน</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Simulated Event Runner (Interactive Widget) -->
+            <div class="panel">
+                <h2 class="panel-title">🎮 ตัวจำลองสถานการณ์ด่านชั่ง (Simulator)</h2>
+                <div class="sim-control">
+                    <label for="vehicle-selector">เลือกกรณีตัวอย่างยานพาหนะ:</label>
+                    <select id="vehicle-selector" class="sim-select">
+                        <option value="truck-class3">🚛 รถชั่งทั่วไป 6 ล้อ (น้ำหนักปกติ, ป้ายทะเบียนปกติ)</option>
+                        <option value="truck-overweight">🚒 รถบรรทุก 10 ล้อ (น้ำหนักเกินกติกา DLT)</option>
+                        <option value="passenger-car">🚗 รถเก๋งส่วนบุคคล (จะถูก OCR กรองทิ้งและลบจาก DB)</option>
+                        <option value="truck-straddling">🚜 รถวิ่งคร่อมเลน (เกิด Straddling Logic ยุบรวม 2 คัน)</option>
+                    </select>
+                </div>
+                <button onclick="runSimulation()" class="sim-btn">
+                    <span>⚡</span> เริ่มแบบจำลองการทำชั่ง
+                </button>
+                <div style="margin-top: 1rem;">
+                    <label style="font-size: 0.8rem; color: var(--text-muted);">ประวัติการประมวลผลจำลอง (Logs):</label>
+                    <div id="sim-console" class="console-log">พร้อมสำหรับการรันแบบจำลอง... เลือกเคสและกดปุ่มได้เลยครับ</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Content Area (Tabs - Right) -->
+        <div style="display: flex; flex-direction: column;">
+            
+            <!-- Tabs Menu -->
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab(event, 'tab-overview')">🔎 ภาพรวมสถาปัตยกรรม</button>
+                <button class="tab-btn" onclick="switchTab(event, 'tab-flow')">⚡ ขั้นตอนการไหลข้อมูล</button>
+                <button class="tab-btn" onclick="switchTab(event, 'tab-logic')">🧠 ลอจิกและการวิเคราะห์</button>
+                <button class="tab-btn" onclick="switchTab(event, 'tab-database')">💾 ฐานข้อมูลและตั้งค่า</button>
+            </div>
+
+            <!-- Tab Content -->
+            <div class="tab-content">
+                
+                <!-- Tab 1: Overview -->
+                <div id="tab-overview" class="tab-pane active">
+                    <h2 class="section-header">⚙️ ภาพรวมระบบและหน้าที่ของ Middleware</h2>
+                    <p class="section-desc">โปรแกรม <strong>IMPS Service</strong> ถูกออกแบบขึ้นมาเพื่อทำหน้าที่เป็น Middleware จัดการด่านชั่งน้ำหนักยานพาหนะ โดยเชื่อมสัญญาณแบบ Real-time และลดความซับซ้อนของการเชื่อมต่อฮาร์ดแวร์ประเภทต่างๆ ให้ทำงานร่วมกันอย่างอัตโนมัติ</p>
+                    
+                    <div class="features-grid">
+                        <div class="feature-card">
+                            <div class="feature-title">🔌 Hardware Abstraction</div>
+                            <div class="feature-desc">รองรับการดึงข้อมูลจากบอร์ดชั่งน้ำหนักสองยี่ห้อหลัก (DataLogger และ InterComp) ผ่านทาง WebSocket Client พร้อมระบบพยายามเชื่อมต่อใหม่แบบ Exponential Backoff</div>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-title">👀 Image Processing &amp; OCR</div>
+                            <div class="feature-desc">เมื่อรถชั่งน้ำหนัก ระบบจะค้นหารูปถ่ายจากกล้องที่จับคู่เวลาและเลน สั่งรันตรวจจับ OCR อ่านค่าป้ายทะเบียน จากนั้นตัดแบ่งเฉพาะส่วนป้าย (Crop) ด้วย Sharp และอัปโหลดไปยังคลาวด์</div>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-title">📏 3D &amp; Wheel Integration</div>
+                            <div class="feature-desc">ดึงรายละเอียดขนาดกว้าง ยาว สูง และสถานะสูงเกินกำหนดจากเครื่องสแกน 3D พร้อมติดต่อกับบอร์ด Pico เพื่อตรวจประเภทของล้อ/ยางในเลน 1</div>
+                        </div>
+                        <div class="feature-card">
+                            <div class="feature-title">🔔 Real-time Outputs</div>
+                            <div class="feature-desc">อัปเดตจอแสดงผล LED (VMS) หน้าด่านชั่งทันทีที่ทราบน้ำหนัก และทำการส่งสัญญาณ WebSocket แจ้งเตือนแผงควบคุม Dashboard พร้อมส่งข้อมูล API ส่วนกลาง</div>
+                        </div>
+                    </div>
+
+                    <div class="alert-callout">
+                        <span class="alert-callout-icon">💡</span>
+                        <div class="alert-callout-content">
+                            <strong>จุดเด่นด้านเสถียรภาพการทำงาน:</strong> ระบบมีการทำ Database Configuration Polling ทุกๆ 5 วินาที เพื่อดูว่าตัวแปรตั้งค่าเปลี่ยนหรือไม่ หากเปลี่ยนระบบจะ Auto-restart อุปกรณ์ควบคุมหน้างานทันทีแบบ On-the-fly โดยไม่ต้องปิดเซิร์ฟเวอร์หลัก
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Flow -->
+                <div id="tab-flow" class="tab-pane">
+                    <h2 class="section-header">🧭 ขั้นตอนการประมวลผลคันรถชั่ง</h2>
+                    <p class="section-desc">เส้นทางการไหลของข้อมูลเมื่อยานพาหนะวิ่งผ่านจุดรับสัญญาณชั่งน้ำหนัก (Weighing Event Pipeline)</p>
+                    
+                    <div class="flow-timeline">
+                        <div class="flow-step trigger">
+                            <div class="flow-marker"></div>
+                            <div class="flow-step-title">ขั้นตอนที่ 1: ตรวจจับสัญญาณการเข้าด่านชั่ง (Trigger)</div>
+                            <div class="flow-step-desc">เมื่อรถเริ่มเหยียบชั่ง สัญญาณ Trigger Event (Start) จะส่งผ่าน WebSocket เข้ามา ระบบสั่งบันทึกรูปภาพจากกล้องทันที โดยสร้างชื่อภาพแบบระบุประเภท เลน และเวลาแสตมป์ละเอียด เพื่อเตรียมพร้อมไว้</div>
+                        </div>
+                        <div class="flow-step processing">
+                            <div class="flow-marker"></div>
+                            <div class="flow-step-title">ขั้นตอนที่ 2: จำแนกและบันทึกประวัติการชั่งเบื้องต้น (Weighing Event)</div>
+                            <div class="flow-step-desc">เมื่อรถวิ่งผ่านพ้น บอร์ดชั่งส่งข้อมูลรวมเข้ามา ระบบจะจำแนกประเภทรถ (Vehicle Classification) ตามจำนวนเพลาและระยะฐานล้อ, คำนวณค่าสะสมน้ำหนักบรรทุกล้อเดี่ยวมาตรฐาน (ESAL), และบันทึกประวัติลงฐานข้อมูลทันที</div>
+                        </div>
+                        <div class="flow-step processing">
+                            <div class="flow-marker"></div>
+                            <div class="flow-step-title">ขั้นตอนที่ 3: ตรวจสอบและดึงข้อมูลบูรณาการ (Metadata Enhancement)</div>
+                            <div class="flow-step-desc">ระบบทำการเชื่อมโยงข้อมูลในเลนที่เกี่ยวข้อง โดยไปขอข้อมูลยางเดี่ยว/ยางคู่จาก Raspberry Pi Pico และสอบถามขนาดมิติตัวรถจาก 3D Scanner API โดยใช้เลขป้ายทะเบียนและเวลามาจับคู่บันทึก</div>
+                        </div>
+                        <div class="flow-step save">
+                            <div class="flow-marker"></div>
+                            <div class="flow-step-title">ขั้นตอนที่ 4: งานเบื้องหลังอัปเดตรูปป้ายทะเบียน (Asynchronous LPR &amp; OCR)</div>
+                            <div class="flow-step-desc">สคริปต์ Background Worker ค้นหาไฟล์ภาพชั่วคราวในโฟลเดอร์ โดยวนลูปหาด้วย Smart Retry 3 ครั้ง หากได้ภาพแล้วจะส่งไปดึงป้ายทะเบียนด้วย OCR API, ตัดรูปป้ายทะเบียนเก็บในระบบ และอัปเดตชื่อทะเบียนพร้อมพาธรูปภาพลง DB</div>
+                        </div>
+                        <div class="flow-step save">
+                            <div class="flow-marker"></div>
+                            <div class="flow-step-title">ขั้นตอนที่ 5: ส่งข้อมูลผลลัพธ์ออกระบบ (Transmission)</div>
+                            <div class="flow-step-desc">ส่งผลลัพธ์ผ่านจอ LED (VMS) หน้าด่านชั่งทันที, ส่งกระจายเรียลไทม์ผ่าน WebSocket ไปที่ Dashboard คอนโซล และส่งบันทึกสุดท้ายขึ้น API ส่วนกลางในคลาวด์</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 3: Logic -->
+                <div id="tab-logic" class="tab-pane">
+                    <h2 class="section-header">🧠 ลอจิกอัจฉริยะและการวิเคราะห์ข้อมูล (Core Logic)</h2>
+                    <p class="section-desc">คำอธิบายกลไกตรรกะในส่วนการประมวลผลคำนวณและตัวคัดกรองความผิดพลาด</p>
+
+                    <div style="display: flex; flex-direction: column; gap: 1.5rem;">
+                        <div>
+                            <h3 style="color: var(--text-title); font-size: 1rem; margin-bottom: 0.5rem;">🚗 รถวิ่งคร่อมเลน (Straddling Merge Logic)</h3>
+                            <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">เมื่อรถขนาดใหญ่วิ่งคร่อมข้ามระว่างสองเลนชั่ง บอร์ดชั่งจะจับได้เป็นยานพาหนะแยกเลน 2 เลนที่มีจำนวนเพลาเท่ากันแต่มีน้ำหนักข้างเดียว (ซ้ายหรือขวา) ในเวลาห่างกันไม่เกิน 3 วินาที (ตั้งค่าได้ใน <span class="code-style">straddling_time_diff</span>)</p>
+                            <p style="font-size: 0.9rem; color: var(--text-muted);">ระบบจะเก็บข้อมูลคันแรกไว้ใน Buffer ชั่วคราว เมื่อคันที่สองตามมาจะทำการ **ควบรวมข้อมูล (Merge)** เข้าด้วยกัน เอาน้ำหนักล้อซ้ายจากเลนซ้ายมารวมกับล้อขวาของเลนขวา ปรับปรุงค่า GVW และสถิติให้กลายเป็นรถคันเดียวอย่างเที่ยงตรง</p>
+                        </div>
+                        <div style="border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+                            <h3 style="color: var(--text-title); font-size: 1rem; margin-bottom: 0.5rem;">🚌 การคัดกรองรถส่วนบุคคลและรถโดยสาร (Bus/Passenger Exclusion Filter)</h3>
+                            <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 0.5rem;">เพื่อลดขยะข้อมูลในคลาวด์ ด่านชั่งจะเก็บเฉพาะรถบรรทุกเชิงพาณิชย์เท่านั้น ระบบมีระบบคัดกรอง 2 ชั้น:</p>
+                            <ul class="info-list" style="margin-left: 1rem;">
+                                <li><strong>ชั้นแรก (Wheelbase)</strong>: ตรวจสอบฐานล้อเพลาคู่แรก ถ้าต่ำกว่ากำหนดและเข้าข่ายเป็นรถโดยสาร (Bus) ระบบจะไม่สั่งดำเนินการต่อ</li>
+                                <li><strong>ชั้นสอง (License Plate)</strong>: หลังอ่านตัวอักษร OCR ถ้าพบตัวอักษรทะเบียนรถเก๋ง (กข, หป) หรือหมวดขึ้นต้นด้วยตัวเลขที่เป็นรถบัส (10-49 ตามมาตรฐานกรมการขนส่งทางบก) ระบบจะลบประวัติของรถคันนั้นๆ ในฐานข้อมูลทิ้งทันที</li>
+                            </ul>
+                        </div>
+                        <div style="border-top: 1px solid var(--border-color); padding-top: 1.25rem;">
+                            <h3 style="color: var(--text-title); font-size: 1rem; margin-bottom: 0.5rem;">📐 การวิเคราะห์ความสูง 3D (3D Dimensions Validation)</h3>
+                            <p style="font-size: 0.9rem; color: var(--text-muted);">การเชื่อมต่อ API ของ 3D Scanner เพื่อบันทึกขนาดจะดึงประวัติตัวรถย้อนหลัง-ล่วงหน้าในช่วง `±5 นาที` และนำทะเบียนมา Normalize ตัดอักษรพิเศษออกทั้งหมดเพื่อให้เปรียบเทียบได้ถูกต้อง จากนั้นนำค่าความสูงที่สแกนได้เทียบกับ <span class="code-style">THREE_DIMENSION_MAXIMUM_HEIGHT</span> หากสูงเกินจะเซ็ตเตือนสถานะสูงเกินใน Warning Map ของตาราง 3D</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab 4: Database -->
+                <div id="tab-database" class="tab-pane">
+                    <h2 class="section-header">💾 โครงสร้างฐานข้อมูลและการตั้งค่า (DB &amp; Configuration)</h2>
+                    <p class="section-desc">รายชื่อตารางหลักในระบบฐานข้อมูล MySQL และตัวแปรตั้งค่าระบบของไฟล์ `.env` ที่ใช้งานปัจจุบัน</p>
+
+                    <h3 style="color: var(--text-title); font-size: 1rem; margin-bottom: 0.75rem;">🔑 ข้อมูลตารางฐานข้อมูลหลัก (Core Tables)</h3>
+                    <div class="data-table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ชื่อตาราง (Table Name)</th>
+                                    <th>รายละเอียดและฟังก์ชันการเก็บบันทึกข้อมูล</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="code-style">configuration</span></td>
+                                    <td>เก็บบันทึกข้อมูลการตั้งค่ากายภาพด่านชั่ง, กล้อง, ป้ายไฟ, ข้อกำหนด และจำนวนวันเก็บล็อกภาพ</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">vehicles</span></td>
+                                    <td>ประวัติน้ำหนักรวม (GVW), ความเร็ว, เลนวิ่ง, แสตมป์เวลา และสถานะการบรรทุกน้ำหนักเกินกฎ DLT</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">axles</span></td>
+                                    <td>น้ำหนักรายเพลา, น้ำหนักข้างซ้าย-ขวา, ระยะฐานล้อ (wheelbase), และข้อมูลประเภทยางเดี่ยว/ยางคู่</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">plates</span></td>
+                                    <td>ตัวอักษรทะเบียน, จังหวัด, พาธรูปภาพป้ายทะเบียนแบบ LPR และรูปถ่ายป้ายพรีวิวที่ผ่านการ Crop</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">three_dimension</span></td>
+                                    <td>เก็บบันทึกขนาด กว้าง ยาว สูง และพาธรูปภาพสแกน 3D ของยานพาหนะ</td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">snapshots</span></td>
+                                    <td>ตารางพักเก็บข้อมูลรูปภาพที่กล้องดึงมา รอการรันวิเคราะห์ในเบื้องหลัง (Background Worker)</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="color: var(--text-title); font-size: 1rem; margin-bottom: 0.75rem; margin-top: 1.5rem;">⚙️ ตัวแปรตั้งค่าสภาพแวดล้อมสำคัญ (.env Configuration Keys)</h3>
+                    <div class="data-table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ตัวแปรตั้งค่า (Key)</th>
+                                    <th>คำอธิบายหน้าที่</th>
+                                    <th>ตัวอย่างค่าที่ระบุ</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><span class="code-style">THREE_DIMENSION_BASE</span></td>
+                                    <td>ที่อยู่ API ปลายทางเครื่องสแกน 3 มิติ</td>
+                                    <td><span class="code-style">http://10.1.28.20:3210</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">PICO_BASE</span></td>
+                                    <td>ที่อยู่ REST API ของเซ็นเซอร์ตรวจยางรถยนต์ Pico</td>
+                                    <td><span class="code-style">http://192.168.145.110:8000</span></td>
+                                </tr>
+                                <tr>
+                                    <td><span class="code-style">SNAP_MATCH_MAX_WAIT_MS</span></td>
+                                    <td>ระยะเวลารอรูปภาพจากกล้องสูงสุด ป้องกันหาไม่พบกรณีรูปช้า</td>
+                                    <td><span class="code-style">3000 ms</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+</div>
+
+<script>
+    // Tab switching controller
+    function switchTab(evt, tabId) {
+        // Get all elements with class="tab-pane" and hide them
+        const tabPanes = document.querySelectorAll(".tab-pane");
+        tabPanes.forEach(pane => pane.classList.remove("active"));
+
+        // Get all elements with class="tab-btn" and remove the class "active"
+        const tabBtns = document.querySelectorAll(".tab-btn");
+        tabBtns.forEach(btn => btn.classList.remove("active"));
+
+        // Show the current tab, and add an "active" class to the button that opened the tab
+        document.getElementById(tabId).classList.add("active");
+        evt.currentTarget.classList.add("active");
+    }
+
+    // Interactive simulator code
+    function runSimulation() {
+        const selectedCase = document.getElementById("vehicle-selector").value;
+        const consoleEl = document.getElementById("sim-console");
+        consoleEl.innerHTML = ""; // Clear console
+
+        const addLog = (text, delay = 0, color = "#38BDF8") => {
+            setTimeout(() => {
+                const span = document.createElement("span");
+                span.style.color = color;
+                span.textContent = `[${new Date().toLocaleTimeString()}] ${text}\n`;
+                consoleEl.appendChild(span);
+                consoleEl.scrollTop = consoleEl.scrollHeight; // Scroll to bottom
+            }, delay);
+        };
+
+        if (selectedCase === "truck-class3") {
+            addLog("เริ่มต้นจำลองด่านชั่ง: ยานพาหนะวิ่งเข้าด่านชั่ง Lane 1...", 0);
+            addLog("📡 [WS] สัญญาณ Trigger Event (Start) เข้ามาแล้วจาก DataLogger scale controller", 400);
+            addLog("📷 [Snapshot] กำลังสั่งถ่ายภาพ LPR: Camera Lane 1 (SnapCode: LPR01)", 800);
+            addLog("📷 [Snapshot] กำลังสั่งถ่ายภาพ Overview: Camera Lane 1 (SnapCode: OVV01)", 1200);
+            addLog("📁 [Snapshot] บันทึกไฟล์ภาพลงเครื่องสำเร็จ และเข้าคิวลง Memory Registry", 1600, "#10B981");
+            addLog("📡 [WS] ได้รับ Weighing Event สิ้นสุดการเหยียบคันรถ (ID: DL_9801)", 2000);
+            addLog("📊 [Mapper] ตรวจวัดระยะฐานล้อแรก = 320 cm. เข้าสูตรจำแนกรถบรรทุก 6 ล้อ (Class 3)", 2400);
+            addLog("⚖️ [Mapper] คำนวณน้ำหนักรวม GVW = 12,500 กิโลกรัม. ค่าจำกัด DLT = 15,000 กิโลกรัม. (ไม่มีการฝ่าฝืน)", 2800, "#10B981");
+            addLog("💡 [LED Display] สั่งขึ้นป้าย VMS LED: ทะเบียนประมวลผลอยู่ / น้ำหนัก 12.5 ตัน", 3200);
+            addLog("💾 [DB] บันทึกข้อมูลคันรถและน้ำหนัก 3 เพลา ลงตาราง 'vehicles' และ 'axles' สำเร็จ (insertId: 201)", 3600, "#10B981");
+            addLog("🤖 [Background] เริ่มกระบวนการตรวจสอบรูปป้ายทะเบียนและ OCR ในพื้นหลัง...", 4000);
+            addLog("🔎 [Background] ค้นหารูปภาพใกล้เคียงสำเร็จ. กำลังส่งภาพ LPR ไปยังระบบอ่าน OCR...", 4500);
+            addLog("🧠 [OCR] ผลลัพธ์ OCR: ป้ายทะเบียน '81-4321' จังหวัด 'นครปฐม'", 5200, "#10B981");
+            addLog("✂️ [OCR] ทำการ Crop เฉพาะกรอบทะเบียนและบันทึกภาพสำเร็จ (sharp crop engine)", 5600);
+            addLog("☁️ [Upload] อัปโหลด LPR, Crop, Overview ไปยังเซิร์ฟเวอร์รูปภาพสำเร็จ", 6000, "#10B981");
+            addLog("💾 [DB] อัปเดตข้อมูลตาราง plates และ images เพิ่มลิงก์รูปภาพในฐานข้อมูลเสร็จสิ้น", 6400, "#10B981");
+            addLog("📡 [Transmission] ส่งข้อมูลชั่งน้ำหนักที่สมบูรณ์ขึ้น API ส่วนกลางและ WebSocket Dashboard เรียบร้อย!", 6800, "#10B981");
+        
+        } else if (selectedCase === "truck-overweight") {
+            addLog("เริ่มต้นจำลองด่านชั่ง: รถบรรทุกหนักวิ่งเข้าด่านชั่ง Lane 1...", 0);
+            addLog("📡 [WS] สัญญาณ Trigger Event (Start) เข้าจาก DataLogger scale controller", 400);
+            addLog("📷 [Snapshot] สั่งถ่ายภาพกล้องเลน 1 ทั้ง LPR และ Overview ด่วน...", 800);
+            addLog("📡 [WS] ได้รับ Weighing Event (ID: DL_9802)", 1200);
+            addLog("📊 [Mapper] ตรวจวัดระยะฐานล้อและกลุ่มเพลา 3 กลุ่ม. จำแนกรถบรรทุก 10 ล้อ (Class 6)", 1600);
+            addLog("⚖️ [Mapper] คำนวณน้ำหนักรวม GVW = 28,400 กิโลกรัม! ค่าจำกัดสูงสุด DLT = 25,000 กิโลกรัม", 2000, "#EF4444");
+            addLog("⚠️ [Mapper] ตรวจพบการบรรทุกน้ำหนักเกิน = 3,400 กก. (+13.6%) กำหนดธง Violation = 1", 2400, "#EF4444");
+            addLog("💡 [LED Display] สั่งขึ้นป้าย VMS LED สัญญาณสีแดง: 'ทะเบียนประมวลผล / น้ำหนัก 28.4 ตัน / สูงเกินกติกา'", 2800, "#EF4444");
+            addLog("💾 [DB] บันทึกข้อมูลรถบรรทุกน้ำหนักเกินลงฐานข้อมูลเรียบร้อย (insertId: 202)", 3200, "#10B981");
+            addLog("📏 [3D Scan] สอบถามข้อมูลสแกนเนอร์ 3 มิติ. ทะเบียน '82-5555' มีขนาดกว้าง 2.50ม. สูง 3.85ม. (สูงเกินกำหนด!)", 3800, "#EF4444");
+            addLog("💾 [3D Scan] บันทึก Warning 1 (สูงเกิน) ลงตาราง 'three_dimension_warning_map' สำเร็จ", 4200, "#10B981");
+            addLog("🧠 [OCR] ผลลัพธ์ OCR ในพื้นหลัง: ทะเบียน '82-5555' จังหวัด 'กรุงเทพมหานคร'", 4800, "#10B981");
+            addLog("☁️ [Upload] อัปโหลดภาพหลักฐานน้ำหนักเกินขึ้นเซิร์ฟเวอร์เรียบร้อย", 5400, "#10B981");
+            addLog("📡 [Transmission] แจ้งเตือนข้อหาบรรทุกเกินไปยังเซิร์ฟเวอร์ส่วนกลางทันที!", 6000, "#EF4444");
+
+        } else if (selectedCase === "passenger-car") {
+            addLog("เริ่มต้นจำลองด่านชั่ง: รถเก๋งส่วนบุคคลวิ่งเหยียบชั่ง Lane 1...", 0);
+            addLog("📡 [WS] สัญญาณ Trigger Event (Start) เข้ามาแล้ว", 400);
+            addLog("📷 [Snapshot] สั่งจับภาพ LPR และบันทึกลงโฟลเดอร์ชั่วคราว", 800);
+            addLog("📡 [WS] ได้รับ Weighing Event (ID: DL_9803) น้ำหนักรวม GVW = 1,800 กิโลกรัม", 1200);
+            addLog("📊 [Mapper] จำนวนเพลา 2 เพลา ระยะล้อสั้น. จัดประเภทเบื้องต้นเป็น Class 1", 1600);
+            addLog("💾 [DB] บันทึกประวัติเบื้องต้นลงฐานข้อมูลเสร็จสิ้นเพื่อเป็น Log ชั่วคราว (insertId: 203)", 2000);
+            addLog("🤖 [Background] ส่งรูปเข้า OCR ตรวจสอบประเภททะเบียนรถ...", 2500);
+            addLog("🧠 [OCR] ผลลัพธ์ OCR: ป้ายทะเบียน 'กข 1234' (เริ่มต้นด้วยตัวอักษรภาษาไทย)", 3200, "#F59E0B");
+            addLog("🚫 [Filter] ตรรกะ DLT คัดกรองตรวจพบ: 'กข 1234' เป็นรถยนต์ส่วนบุคคลนั่งส่วนบุคคล (Passenger Car)", 3800, "#F59E0B");
+            addLog("🗑️ [Filter] ดำเนินการล้างข้อมูลขยะ: ลบประวัติชั่งน้ำหนัก ID 203 ออกจากตารางหลักทั้งหมด (vehicles, axles, plates, images) เพื่อประหยัดพื้นที่", 4400, "#F59E0B");
+            addLog("✅ [Filter] สิ้นสุดขั้นตอน: ลบข้อมูลขยะเสร็จสมบูรณ์. ด่านชั่งไม่ส่งข้อมูลรถเก๋งขึ้นคลาวด์", 5000, "#10B981");
+
+        } else if (selectedCase === "truck-straddling") {
+            addLog("เริ่มต้นจำลองด่านชั่ง: รถวิ่งคร่อมสองเลน (เลน 1 และ เลน 2)...", 0);
+            addLog("📡 [WS] ได้รับ Trigger รถเหยียบชั่งเลน 1 และเลน 2 ในเวลาไล่เลี่ยกัน...", 400);
+            addLog("📷 [Snapshot] บันทึกรูปภาพเลน 1 (ซ้าย) และเลน 2 (ขวา)", 800);
+            addLog("📡 [WS] ได้รับน้ำหนักชิ้นแรกเลน 1: เพลา 3 เพลา, ล้อซ้ายหนัก 3,000กก., ล้อขวาหนัก 0กก. (Crossing Lane Warning)", 1400, "#F59E0B");
+            addLog("⏳ [Straddling] ตรวจพบ Crossing Flag 9. นำข้อมูลพักเข้าสู่ Buffer รอกลุ่มเพลาฝั่งตรงข้าม...", 1800, "#F59E0B");
+            addLog("📡 [WS] ได้รับน้ำหนักชิ้นที่สองเลน 2: เพลา 3 เพลา, ล้อซ้ายหนัก 0กก., ล้อขวาหนัก 2,800กก. ห่างกัน 0.8 วินาที", 2400, "#F59E0B");
+            addLog("🚜 [Straddling] พบสัญญาณคู่ตรงกัน! ระยะเวลาอยู่ในเกณฑ์ 3 วินาที และเพลาเท่ากัน. เริ่มดำเนินการควบรวมข้อมูล (Merge)...", 3000, "#10B981");
+            addLog("📊 [Straddling] รวมน้ำหนักล้อซ้ายจากเลน 1 และล้อขวาจากเลน 2. ปรับน้ำหนักรวม GVW = 5,800 กิโลกรัม สำเร็จ!", 3600, "#10B981");
+            addLog("💾 [DB] บันทึกข้อมูลคันรถที่เป็นผลจากการ Merge เรียบร้อย (isStraddlingMerged = true) (insertId: 204)", 4200, "#10B981");
+            addLog("📡 [Transmission] ส่งออกข้อมูลน้ำหนักที่ทำการ Merge สำเร็จไปที่ป้ายไฟ VMS และเซิร์ฟเวอร์กลางแล้ว", 4800, "#10B981");
+        }
+    }
+</script>
+
+</body>
+</html>
