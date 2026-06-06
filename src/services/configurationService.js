@@ -20,6 +20,7 @@ let lastUpdatedAt;
  * @returns {Promise<Array>} - Array of all configuration data.
  */
 async function getConfiguration() {
+  const startTime = Date.now();
   try {
     const [rows] = await pool.query(
       `
@@ -80,6 +81,8 @@ async function getConfiguration() {
   } catch (err) {
     console.error("Error fetching configuration:", err);
     throw err;
+  } finally {
+    console.log(`[PERF] getConfiguration took ${Date.now() - startTime}ms`);
   }
 }
 

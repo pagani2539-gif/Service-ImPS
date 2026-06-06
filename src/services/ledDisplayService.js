@@ -33,6 +33,7 @@ async function createAndSendLedDisplayImage(
   outputPath,
   led_enabled
 ) {
+  const startTime = Date.now();
   try {
     const totalWidth = 320;
     const totalHeight = 480;
@@ -94,6 +95,8 @@ async function createAndSendLedDisplayImage(
     }
   } catch (error) {
     console.error("Error creating or sending LED display image:", error);
+  } finally {
+    console.log(`[PERF] createAndSendLedDisplayImage took ${Date.now() - startTime}ms`);
   }
 }
 

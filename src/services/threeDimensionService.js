@@ -36,63 +36,68 @@ function warning_map(isOverHeight) {
  * @returns {Promise<Object>} vehicle (ที่มี field threeDimension เพิ่มเข้ามา)
  */
 async function getThreeDimension(tdBase, vehicle, vehicleID) {
-  if (threeDimensionDelay > 0) {
-    await new Promise((resolve) => setTimeout(resolve, threeDimensionDelay));
-  }
-  if (!vehicle?.stamp) {
-    throw new Error('vehicle.stamp is required');
-  }
-
-  const minStamp = dayjs(vehicle.stamp)
-    .subtract(5, 'minute')
-    .format('DD-MM-YYYY HH:mm');
-
-  const maxStamp = dayjs(vehicle.stamp)
-    .add(5, 'minute')
-    .format('DD-MM-YYYY HH:mm');
-
-  const payload = {
-    startDate: minStamp,
-    stopDate: maxStamp,
-  };
-
+  const startTime = Date.now();
   try {
-    const { data: res } = await axios.post(`${tdBase}/report-3d/transaction`, payload, {
-      timeout: 3000 // 3 วินาที
-    });
-    const rows = Array.isArray(res?.data) ? res.data : [];
-
-    const vehiclePlate = normalizePlate(vehicle.licensePlate);
-    let found = null;
-    console.log('timestamp :', vehicle.stamp)
-    for (const item of rows) {
-      const threeDimensionLicensePlate = normalizePlate(item.license_plate);
-      if (threeDimensionLicensePlate && vehiclePlate && threeDimensionLicensePlate === vehiclePlate) {
-        console.log('compare license : ', vehiclePlate, threeDimensionLicensePlate, item.timestamp)
-        const rawHeight = item.hight ?? item.height ?? null;
-        const overHeight = isOverHeight(rawHeight);
-        found = {
-          vehicle_id: vehicleID,
-          three_dimension_id: item.id || item._id,
-          stamp: item.timestamp,
-          pcd_image: `${tdBase}/${item.pathPCDImage}`,
-          plate_image: `${tdBase}/${item.pathImage}`,
-          license_plate: item.license_plate,
-          province: item.province,
-          vehicle_width: item.width,
-          vehicle_length: item.long,
-          vehicle_height: item.hight,
-          is_over_height: overHeight,
-          warning: warning_map(overHeight),
-        };
-        break; // เจอแล้วก็หยุดเลย
-      }
+    if (threeDimensionDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, threeDimensionDelay));
+    }
+    if (!vehicle?.stamp) {
+      throw new Error('vehicle.stamp is required');
     }
 
-    return found;
-  } catch (err) {
-    err.message = `getThreeDimension failed: ${err.message}`;
-    throw err;
+    const minStamp = dayjs(vehicle.stamp)
+      .subtract(5, 'minute')
+      .format('DD-MM-YYYY HH:mm');
+
+    const maxStamp = dayjs(vehicle.stamp)
+      .add(5, 'minute')
+      .format('DD-MM-YYYY HH:mm');
+
+    const payload = {
+      startDate: minStamp,
+      stopDate: maxStamp,
+    };
+
+    try {
+      const { data: res } = await axios.post(`${tdBase}/report-3d/transaction`, payload, {
+        timeout: 3000 // 3 วินาที
+      });
+      const rows = Array.isArray(res?.data) ? res.data : [];
+
+      const vehiclePlate = normalizePlate(vehicle.licensePlate);
+      let found = null;
+      console.log('timestamp :', vehicle.stamp)
+      for (const item of rows) {
+        const threeDimensionLicensePlate = normalizePlate(item.license_plate);
+        if (threeDimensionLicensePlate && vehiclePlate && threeDimensionLicensePlate === vehiclePlate) {
+          console.log('compare license : ', vehiclePlate, threeDimensionLicensePlate, item.timestamp)
+          const rawHeight = item.hight ?? item.height ?? null;
+          const overHeight = isOverHeight(rawHeight);
+          found = {
+            vehicle_id: vehicleID,
+            three_dimension_id: item.id || item._id,
+            stamp: item.timestamp,
+            pcd_image: `${tdBase}/${item.pathPCDImage}`,
+            plate_image: `${tdBase}/${item.pathImage}`,
+            license_plate: item.license_plate,
+            province: item.province,
+            vehicle_width: item.width,
+            vehicle_length: item.long,
+            vehicle_height: item.hight,
+            is_over_height: overHeight,
+            warning: warning_map(overHeight),
+          };
+          break; // เจอแล้วก็หยุดเลย
+        }
+      }
+
+      return found;
+    } catch (err) {
+      err.message = `getThreeDimension failed: ${err.message}`;
+      throw err;
+    }
+  } finally {
+    console.log(`[PERF] getThreeDimension took ${Date.now() - startTime}ms`);
   }
 }
 

@@ -82,7 +82,7 @@ class InterComp extends WSController {
   async findAndProcessSnapshots(mappedData, existingLpr = null, existingOverview = null) {
     const lane = normalizeLane(mappedData.lane);
     const lastTrigger = this.lastTriggerTimes.get(lane);
-    const hasRecentTrigger = lastTrigger && (Date.now() - lastTrigger <= 15000); // 15 seconds window
+    const hasRecentTrigger = lastTrigger && (Date.now() - lastTrigger <= 3000); // 3 seconds window
 
     // 1. เริ่มค้นหาเฉพาะส่วนที่ยังไม่มีข้อมูล (รองรับการ Retry)
     // Smart Retry: ถ้ามี snapshot เดิมที่เคยหาเจอแล้วแต่ upload พลาด ให้ใช้ใบเดิม
@@ -268,8 +268,6 @@ class InterComp extends WSController {
         }
       }
 
-      sendToVMS(this.config.led_url, mappedData);
-
       // Perform initial snapshot search, OCR and upload BEFORE database insert
       const findResult = await this.findAndProcessSnapshots(mappedData);
 
@@ -277,6 +275,8 @@ class InterComp extends WSController {
         console.warn(`[Filter] Vehicle is excluded by plate (Passenger car/Bus). Skipping insert.`);
         return;
       }
+
+      sendToVMS(this.config.led_url, mappedData);
 
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log("Data saved successfully for Vehicle ID:", vehicleID);
@@ -292,8 +292,8 @@ class InterComp extends WSController {
 
       // Only transmit initial data if both images are present
       if (mappedData.overviewPath && mappedData.platePath) {
-        // Add 500ms delay to prevent race condition of browser requesting image before server disk write
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Add 150ms delay to prevent race condition of browser requesting image before server disk write
+        await new Promise((resolve) => setTimeout(resolve, 150));
         sendToWebSocket({ vehicleID });
         sendToTransmission(transmissionUrl, { vehicleID });
         hasTransmitted = true;
@@ -314,8 +314,8 @@ class InterComp extends WSController {
    */
   async processImagesRetryInBackground(vehicleID, mappedData, findResult) {
     try {
-      const maxRetries = 3;
-      const retryDelayMs = 5000;
+      const maxRetries = 5;
+      const retryDelayMs = 2000;
       let attempt = 0;
       let hasTransmitted = false;
 
@@ -350,8 +350,8 @@ class InterComp extends WSController {
 
         // If we got both images now, transmit and break out of retry loop
         if (mappedData.overviewPath && mappedData.platePath) {
-          // Add 500ms delay to prevent race condition of browser requesting image before server disk write
-          await new Promise((resolve) => setTimeout(resolve, 500));
+          // Add 150ms delay to prevent race condition of browser requesting image before server disk write
+          await new Promise((resolve) => setTimeout(resolve, 150));
           sendToWebSocket({ vehicleID });
           sendToTransmission(transmissionUrl, { vehicleID });
           hasTransmitted = true;
@@ -372,10 +372,9 @@ class InterComp extends WSController {
 
   // ฟังก์ชันสำหรับส่งข้อมูลที่ค้างใน Buffer ไปประมวลผลต่อจนจบ (DB, VMS, WS)
   async processFinalVehicle(mappedData) {
+    const startTime = Date.now();
     try {
       console.log(`[Straddling] Processing single part for InterComp ID: ${mappedData.id} (No partner found)`);
-      sendToVMS(this.config.led_url, mappedData);
-
       // Perform initial snapshot search and OCR
       const findResult = await this.findAndProcessSnapshots(mappedData);
 
@@ -384,12 +383,15 @@ class InterComp extends WSController {
         return;
       }
 
+      sendToVMS(this.config.led_url, mappedData);
+
       const vehicleID = await insertVehicleWithDetails(mappedData);
       console.log(`[Straddling] Single part saved successfully for Vehicle ID: ${vehicleID}`);
 
       let hasTransmitted = false;
       if (mappedData.overviewPath && mappedData.platePath) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Add 150ms delay to prevent race condition of browser requesting image before server disk write
+        await new Promise((resolve) => setTimeout(resolve, 150));
         sendToWebSocket({ vehicleID });
         sendToTransmission(transmissionUrl, { vehicleID });
         hasTransmitted = true;
@@ -402,6 +404,8 @@ class InterComp extends WSController {
       }
     } catch (err) {
       console.error("Error in processFinalVehicle:", err);
+    } finally {
+      console.log(`[PERF] processFinalVehicle took ${Date.now() - startTime}ms`);
     }
   }
 
