@@ -8,9 +8,9 @@ const logger = require("./logger");
 const perf = require("./perfMonitor");
 const { snapshotRegistry, normalizeLane } = require("./snapshotRegistry");
 
-// ความถี่ขั้นต่ำของการเช็ค DB ระหว่างรอจับคู่รูป (memory เช็คแบบ event-driven แทน)
-const SNAP_MATCH_DB_POLL_MS = Number(process.env.SNAP_MATCH_DB_POLL_MS) || 1000;
-const SNAP_MATCH_MAX_WAIT_MS = Number(process.env.SNAP_MATCH_MAX_WAIT_MS) || 5000;
+// ค่าดีฟอลต์หากไม่ได้ระบุใน env หรือฐานข้อมูล
+const DEFAULT_SNAP_MATCH_DB_POLL_MS = 1000;
+const DEFAULT_SNAP_MATCH_MAX_WAIT_MS = 3000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -73,6 +73,7 @@ class SnapshotManager {
         type,
         stamp: stampDate,
         imageUrl: filePath,
+        buffer: response.data,
       });
 
       // บันทึกลง DB แบบไม่บล็อก — memory คือแหล่งหลัก แถว DB ใช้เฉพาะกู้รูปหลัง restart
@@ -85,7 +86,7 @@ class SnapshotManager {
           logger.error(`[Snapshot] DB Insert failed for ${filename}: ${dbErr.message}`);
         });
 
-      return { lane, type, stamp: stampDate, imageUrl: filePath };
+      return { lane, type, stamp: stampDate, imageUrl: filePath, buffer: response.data };
     } catch (err) {
       logger.error(`Error taking snapshot for lane ${lane}, type ${type}: ${err.message}`);
       return null;
@@ -108,7 +109,10 @@ class SnapshotManager {
       await sleep(initialDelay);
     }
 
-    const deadline = Date.now() + SNAP_MATCH_MAX_WAIT_MS;
+    const maxWaitMs = Number(process.env.SNAP_MATCH_MAX_WAIT_MS) || this.config.snap_match_max_wait_ms || DEFAULT_SNAP_MATCH_MAX_WAIT_MS;
+    const dbPollMs = Number(process.env.SNAP_MATCH_DB_POLL_MS) || this.config.snap_match_db_poll_ms || DEFAULT_SNAP_MATCH_DB_POLL_MS;
+
+    const deadline = Date.now() + maxWaitMs;
     const lane = normalizeLane(mappedData.lane);
     let attempts = 0;
     let lastDbCheck = 0;
@@ -116,7 +120,7 @@ class SnapshotManager {
     while (Date.now() <= deadline) {
       attempts++;
       const now = Date.now();
-      const checkDb = lastDbCheck === 0 || now - lastDbCheck >= SNAP_MATCH_DB_POLL_MS;
+      const checkDb = lastDbCheck === 0 || now - lastDbCheck >= dbPollMs;
       if (checkDb) lastDbCheck = now;
 
       const found = await this._findSnapshotOnce(mappedData, type, { checkDb });
@@ -124,11 +128,11 @@ class SnapshotManager {
 
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
-      await snapshotRegistry.waitForRegister(lane, type, Math.min(remaining, SNAP_MATCH_DB_POLL_MS));
+      await snapshotRegistry.waitForRegister(lane, type, Math.min(remaining, dbPollMs));
     }
 
     const targetTime = dayjs(mappedData.stamp).format("HH:mm:ss.SSS");
-    logger.warn(`[Snapshot] Not found after ${attempts} attempts (${SNAP_MATCH_MAX_WAIT_MS}ms). Type: ${type}, Target: ${targetTime}, Lane: ${mappedData.lane}`);
+    logger.warn(`[Snapshot] Not found after ${attempts} attempts (${maxWaitMs}ms). Type: ${type}, Target: ${targetTime}, Lane: ${mappedData.lane}`);
     return null;
   }
 
@@ -223,15 +227,18 @@ class SnapshotManager {
     }
   }
 
-  async uploadImage(filePath) {
+  async uploadImage(filePath, type = null, buffer = null) {
     try {
-      if (!(await fs.pathExists(filePath))) {
-        throw new Error(`File does not exist: ${filePath}`);
-      }
-
       const fileName = path.basename(filePath);
       const formData = new FormData();
-      formData.append("image", fs.createReadStream(filePath));
+      if (buffer) {
+        formData.append("image", buffer, { filename: fileName, contentType: "image/jpeg" });
+      } else {
+        if (!(await fs.pathExists(filePath))) {
+          throw new Error(`File does not exist: ${filePath}`);
+        }
+        formData.append("image", fs.createReadStream(filePath));
+      }
       formData.append("fileName", fileName);
 
       // Increased timeout to 10s for midnight stability

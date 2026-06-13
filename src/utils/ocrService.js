@@ -120,7 +120,9 @@ module.exports = {
   async sendToOCR(snapshot, ocrEndpoint) {
     try {
       const fullPath = snapshot.imageUrl;
-      const base64Data = await this.loadImageAsBase64(fullPath);
+      const base64Data = snapshot.buffer
+        ? `data:image/jpeg;base64,${snapshot.buffer.toString("base64")}`
+        : await this.loadImageAsBase64(fullPath);
 
       const response = await axios({
         method: "POST",

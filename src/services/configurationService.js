@@ -20,6 +20,9 @@ let lastUpdatedAt;
  * @returns {Promise<Array>} - Array of all configuration data.
  */
 async function getConfiguration() {
+  if (pool.dbInitializedPromise) {
+    await pool.dbInitializedPromise;
+  }
   const startTime = Date.now();
   try {
     const [rows] = await pool.query(
@@ -53,6 +56,11 @@ async function getConfiguration() {
           c.vehicle_length_ignored,
           c.retention_days,
           c.straddling_time_diff,
+          c.snap_match_db_poll_ms,
+          c.snap_match_max_wait_ms,
+          c.trigger_history_window_ms,
+          c.metrics_interval_ms,
+          c.metrics_format,
           -- Subquery for streaming_urls
           (SELECT JSON_ARRAYAGG(JSON_OBJECT('url', su.url))
           FROM streaming_urls su

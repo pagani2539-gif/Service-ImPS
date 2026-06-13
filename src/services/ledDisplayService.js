@@ -10,6 +10,9 @@ const logger = require("../utils/logger");
  * @returns {Promise<object>} - The response data from the POST request.
  */
 async function sendToVMS(url, data) {
+  if (!url || url.trim() === "" || url === "null" || url === "undefined") {
+    return;
+  }
   try {
     const response = await axios.post(url, data, {
       timeout: 3000, // Set timeout to 3000ms

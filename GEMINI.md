@@ -6,11 +6,12 @@
 ### Key Features:
 - **Hardware Integration:** Supports **DataLogger** and **InterComp** weighing controllers via WebSocket. Includes reconnect logic with exponential backoff.
 - **Dynamic Configuration:** Polls the local MySQL database for configuration changes every 5 seconds and auto-restarts controllers as needed.
-- **Visual Intelligence:** Integrates with OCR services for license plate recognition, manages image snapshots (LPR, Overview) with a software-based on-demand fallback if hardware triggers fail, crops plate regions with `sharp`, and uploads to central servers.
+- **Visual Intelligence:** Integrates with OCR services for license plate recognition. Features an in-memory **Memory-Cache Buffer (30-second TTL)** in `SnapshotRegistry` to store image buffers directly and bypass disk reads. Uses a software-based on-demand fallback if hardware triggers fail, crops plate regions with `sharp`, and uploads to central servers.
+- **Asynchronous Background Flow:** Bypasses synchronous waiting for snapshots/OCR. Immediately inserts weight data to the database (~20ms) and updates LED displays (VMS) to keep the station flowing, then performs image matching, OCR processing, 3D scanning queries, and uploads in the background. WebSocket broadcasts and central HTTP transmissions are executed once the background task completes, ensuring the UI remains dynamic without manual F5 refreshes.
 - **Real-time Feedback:** Drives LED displays (VMS) and broadcasts data via WebSockets and HTTP transmission to central servers.
 - **Tire Classification:** Integrates with a Raspberry Pi Pico tire sensor to identify single or dual tire configurations per axle.
 - **3D Dimensions:** Integrates with a 3D Dimension Scanner to fetch vehicle width, length, and height, registering overheight violations.
-- **Straddling Logic:** Buffers and merges vehicle transactions when a vehicle straddles across multiple lanes within a time threshold.
+- **Straddling Logic:** Buffers and merges vehicle transactions when a vehicle straddles across adjacent lanes. Uses a high-precision matching algorithm comparing millisecond timestamps, adjacent lane differences, speeds, and individual axle spacing (wheelbase) to ensure accurate merging, with detailed logging of axle weight calculations.
 - **Automated Maintenance:** Includes a midnight cleanup service for snapshots and database logs to ensure system longevity.
 
 ### Tech Stack:
@@ -76,12 +77,17 @@
 - **Error Handling:** Use `try/catch` blocks extensively, especially around hardware communication and database queries.
 
 ### Data Flow:
-1. Trigger detected by hardware (fires camera snapshot and stores in memory/DB registry).
-2. `WSController` receives raw data transaction from weighing scale.
-3. Mapper transforms data and applies classification (Vehicle Class, ESAL, GVW violations).
-4. Snapshot managers match and claim pre-triggered images. If no pre-triggered images exist (hardware trigger failure), a software fallback automatically triggers the cameras to capture live snapshots on-demand.
-5. `vehiclesService` records vehicle details and image paths to database.
-6. `transmissionService` and `wsService` distribute results to central server and dashboard.
+1. **Trigger & Cache**: Camera is triggered by hardware sensor, saving LPR/Overview snapshots into the disk and registering their binary data in `SnapshotRegistry`'s memory cache (30s TTL).
+2. **Weighing Transaction**: Weighing scale controller receives raw vehicle weight/axle data via WebSocket.
+3. **Classification & Mapping**: Data is parsed, class/axle allowances/ESAL calculated, and speed/lane verified.
+4. **Immediate Database Save & VMS Update**: Vehicle data is inserted into the local DB immediately (~20ms) and the LED display (VMS) is updated to notify the driver.
+5. **Background Visual Processing (Async Task)**: 
+   - `SnapshotManager` claims closest matched snapshots from memory/disk. If missing (sensor failure), it triggers live fallback snapshots immediately.
+   - Binary buffer is passed to `ocrService` to detect license plate numbers.
+   - Plates and crops are uploaded to image servers, and DB records are updated.
+   - If plate classification indicates an excluded vehicle (bus/passenger car), the row is deletedย้อนหลัง (Ghost Record Cleanup).
+   - If 3D scanner integration is enabled, height/width/length is retrieved and linked.
+6. **Transmission & WebSocket Broadcast**: Once background tasks are finalized, WebSocket signals and HTTP API requests are transmitted to central servers.
 
 ### Maintenance & Operations:
 - **Configuration Updates:** Changes to the `configuration` table in the database are detected automatically. No manual restart is typically required.

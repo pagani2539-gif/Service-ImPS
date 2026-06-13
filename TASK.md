@@ -97,7 +97,28 @@
 
 **ไฟล์:** `snapshotManager.js`, `snapshotRegistry.js` (window), `DataLogger.js`, `InterComp.js`, `perfMonitor.js`, `.env.example`
 
+## Task 2 — เพิ่มความแม่นยำในการยุบรวมรถวิ่งคร่อมเลน (Straddling Merge) & บันทึก Log ✅
+- [x] ตรวจสอบเวลาระดับมิลลิวินาที (ต่างกันไม่เกิน 1,000 ms หรือตาม config)
+- [x] ตรวจสอบระยะฐานล้อ (Wheelbase) ของเพลาคู่ขนาน (ความต่างไม่เกิน 30 ซม.)
+- [x] ตรวจสอบความสอดคล้องของความเร็ว (ต่างกันไม่เกิน 15 กม./ชม.)
+- [x] บังคับเลนที่ต้องอยู่ติดกันเสมอ (Adjacent Lanes)
+- [x] เพิ่ม Log รายละเอียดการยุบรวม แสดงน้ำหนักเพลาก่อนและหลังรวม
+- [x] [Bugfix] เพิ่มฟังก์ชันตรวจสอบ 3D Dimension Scanner ในกรณี fallback ของรถคร่อมเลน (`processFinalVehicle`)
+
+**ไฟล์:** `DataLogger.js`, `InterComp.js`
+
+## Task 3 — การเพิ่มความเร็วและเสถียรภาพ (Memory-Cache Buffer, Asynchronous Background Flow, Zero-Delay Fallback, Ghost Record Cleanup) ✅
+- [x] **Memory-Cache Buffer:** พัฒนาระบบเก็บ Binary Image Buffer ใน RAM บน Snapshot Registry โดยมีอายุ TTL 30 วินาที เพื่อป้อนให้ OCR Service ประมวลผลได้ทันทีโดยไม่ต้องอ่านจากฮาร์ดดิสก์ (ลด Disk I/O)
+- [x] **Asynchronous Background Flow (ทางเลือก B):** ปรับจูนโฟลว์การทำงานใน DataLogger และ InterComp ให้บันทึกข้อมูลรถและน้ำหนักลง MySQL ทันที (~20ms) และส่งข้อมูลจอ LED (VMS) ทันที จากนั้นย้ายการค้นหารูปภาพ, OCR, อัปโหลด, และการคำนวณ 3D ไปทำแบบเบื้องหลัง (Background Async Task) โดยจะส่ง WebSocket สัญญาณและ HTTP ส่งเซิร์ฟเวอร์หลักหลังจากได้รูปครบ เพื่อไม่ให้หน้าเว็บ UI ต้องรีเฟรช F5
+- [x] **Zero-Delay Fallback:** ใช้ `inFlightDownloads` ติดตามสถานะกล้องร่วมกับ Cache ตรวจสอบสิทธิ์การใช้งาน หากรถไม่เหยียบเซ็นเซอร์ จะสั่งถ่ายภาพสดโดยไม่ต้องหน่วงเวลา 3 วินาที
+- [x] **Ghost Record Cleanup:** เพิ่มฟังก์ชัน `deleteVehicleFromDatabase` ย้อนหลังหากภาพผล OCR ประมวลผลพบว่าเป็นรถประเภท Excluded ป้องกันไม่ให้เกิดข้อมูลขยะใน Database
+- [x] **ปรับปรุงความสูงของข้อมูล LOG:** ปรับรูปแบบความยาวและโครงสร้าง logs ให้เรียงความกว้างของฟิลด์และพิมพ์ผลลัพธ์ในบรรทัดใหม่เมื่อมี error/stack trace
+
+**ไฟล์:** `DataLogger.js`, `InterComp.js`, `snapshotRegistry.js`, `snapshotManager.js`, `ocrService.js`, `logger.js`
+
 ## ขั้นต่อไป
 
-- [ ] Commit งาน 3 รอบ (แนะนำแยก 3 commit ตามรอบ เพื่อ rollback ง่าย)
+- [ ] Commit งานทั้งหมดและจัดระเบียบ branch
 - [ ] Deploy + เฝ้าดู `[Metrics]` 1 รอบ (5 นาที) หา bottleneck จริงหน้างาน
+
+

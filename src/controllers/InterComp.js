@@ -22,14 +22,14 @@ const {
   mergeStraddlingVehicles,
 } = require("../utils/mappers/mapInterComp");
 const SnapshotManager = require("../utils/snapshotManager");
-const { normalizeLane } = require("../utils/snapshotRegistry");
+const { snapshotRegistry, normalizeLane } = require("../utils/snapshotRegistry");
 const dayjs = require("dayjs");
 const ocrService = require("../utils/ocrService");
 const pool = require("../config/db");
 const path = require("path");
 const logger = require("../utils/logger");
 const perf = require("../utils/perfMonitor");
-const { insertVehicleWithDetails } = require("../services/vehiclesService");
+const { insertVehicleWithDetails, updatePlates, updateOverview } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
 const threeDimensionBase = process.env.THREE_DIMENSION_BASE || '';
@@ -79,6 +79,8 @@ class InterComp extends WSController {
     this.ocrResultCache = new Map();
     // กัน data message ซ้ำ (เช่น controller ส่งซ้ำหลัง WS reconnect) — Key: "lane:id"
     this.recentMessageIds = new Map();
+    // เก็บสถานะ trigger ที่กำลังดาวน์โหลดอยู่เพื่อทำ Zero-Delay Fallback
+    this.inFlightDownloads = new Set();
   }
   async stop() {
     logger.info(`Stopping Intercomp for station: ${this.config.station_name}`);
@@ -108,15 +110,16 @@ class InterComp extends WSController {
     perf.observe("image_wait_ms", imageWaitMs);
     perf.observe("db_insert_ms", insertMs);
     perf.observe("sensor_to_db_ms", sensorToDbMs);
-    logger.info(`[PERF] ID: ${mappedData.id} VehicleID: ${vehicleID} total=${totalMs}ms find=${findMs}ms imageWait=${imageWaitMs}ms insert=${insertMs}ms sensorToDb=${sensorToDbMs}ms`);
+    logger.info(`🚗 [Vehicle Saved] ID: ${mappedData.id} | VehicleID: ${vehicleID} | Class: ${mappedData.vehicleClassID} | Plate: ${mappedData.licensePlate || "N/A"} (${mappedData.province || "N/A"}) | GVW: ${mappedData.gvw} kg | Speed: ${mappedData.speed} km/h | Lane: ${mappedData.lane} | Total: ${totalMs}ms (Find: ${findMs}ms, Wait: ${imageWaitMs}ms, Insert: ${insertMs}ms) | Latency: ${sensorToDbMs}ms`);
   }
   async findAndProcessSnapshots(mappedData, existingLpr = null, existingOverview = null) {
     const lane = normalizeLane(mappedData.lane);
-    const lastTrigger = this.lastTriggerTimes.get(lane);
-    // หน้าต่างมองย้อนประวัติ trigger — ถ้ามี trigger ในช่วงนี้ จะ "รอ" รูปจริง (findSnapshots) แทนถ่ายสดทันที
-    // โค้ดเดิม 3000ms / design ใน README คือ 15000ms — ปรับด้วย env ได้
-    const triggerWindowMs = Number(process.env.TRIGGER_HISTORY_WINDOW_MS) || 3000;
-    const hasRecentTrigger = lastTrigger && (Date.now() - lastTrigger <= triggerWindowMs);
+    const minMs = Number(process.env.SNAP_MATCH_BACK_MS) || this.config.minimum_search || 2000;
+    const maxMs = Number(process.env.SNAP_MATCH_FWD_MS) || this.config.maximum_search || 8000;
+    const hasImageInRegistry = snapshotRegistry.hasUnusedImageInWindow(lane, "lpr", mappedData.stamp, minMs, maxMs);
+    const hasActiveDownload = this.inFlightDownloads.has(lane);
+    // หากมีรูปใน memory หรือกำลังดาวน์โหลดอยู่ ให้ถือว่ามี Trigger จริงและทำการรอ
+    const hasRecentTrigger = hasImageInRegistry || hasActiveDownload;
 
     // 1. เริ่มค้นหาเฉพาะส่วนที่ยังไม่มีข้อมูล (รองรับการ Retry)
     // Smart Retry: ถ้ามี snapshot เดิมที่เคยหาเจอแล้วแต่ upload พลาด ให้ใช้ใบเดิม
@@ -164,7 +167,7 @@ class InterComp extends WSController {
         cachedOcr
           ? Promise.resolve(cachedOcr)
           : ocrService.sendToOCR(activeLprSnapshots, this.config.ocr_url),
-        this.lprSnapshotManager.uploadImage(activeLprSnapshots.imageUrl, "lpr")
+        this.lprSnapshotManager.uploadImage(activeLprSnapshots.imageUrl, "lpr", activeLprSnapshots.buffer)
       ]);
       if (ocrResult && !cachedOcr) {
         this.ocrResultCache.set(activeLprSnapshots.imageUrl, ocrResult);
@@ -211,7 +214,7 @@ class InterComp extends WSController {
 
       if (!activeOverviewSnapshots) return null;
       overviewSnapshotsFound = activeOverviewSnapshots;
-      const uploadResult = await this.overviewSnapshotManager.uploadImage(activeOverviewSnapshots.imageUrl, "overview");
+      const uploadResult = await this.overviewSnapshotManager.uploadImage(activeOverviewSnapshots.imageUrl, "overview", activeOverviewSnapshots.buffer);
       if (uploadResult.success) {
         mappedData.overviewPath = uploadResult.data.fileUrl;
       }
@@ -262,21 +265,51 @@ class InterComp extends WSController {
 
         const maxDiff = this.config.straddling_time_diff || 3;
 
-        // ค้นหาคู่ใน Buffer (เทียบเวลา + จำนวนเพลา)
+        // ค้นหาคู่ใน Buffer (เทียบเวลา + เลนติดกัน + จำนวนเพลา + ระยะฐานล้อ + ความเร็ว)
         for (let [key, bufferedVehicle] of this.straddlingBuffer) {
           const bufferedTime = dayjs(bufferedVehicle.data.stamp);
-          const timeDiff = Math.abs(currentTime.diff(bufferedTime, 'second'));
+          
+          // 1. ตรวจสอบเวลาห่างกันระดับมิลลิวินาที (ไม่เกิน 1 วินาที หรือตาม config)
+          const timeDiffMs = Math.abs(currentTime.diff(bufferedTime, 'millisecond'));
+          const maxTimeDiffMs = maxDiff * 1000;
+          const isTimeOk = timeDiffMs <= Math.min(1000, maxTimeDiffMs);
 
-          // เงื่อนไข: เวลาห่างกันไม่เกิน 3 วินาที และจำนวนเพลาเท่ากัน
-          if (timeDiff <= maxDiff && bufferedVehicle.data.axles.length === mappedData.axles.length) {
-            logger.info(`[Straddling] Match found! Merging InterComp vehicles (Time Diff: ${timeDiff}s, Axles: ${mappedData.axles.length})`);
-            clearTimeout(bufferedVehicle.timeoutHandle);
-            let merged = mergeStraddlingVehicles(bufferedVehicle.data, mappedData);
-            if (merged) {
-              mappedData = merged;
-              this.straddlingBuffer.delete(key);
-              matchFound = true;
-              break; 
+          // 2. ตรวจสอบหมายเลขเลนว่าต้องอยู่ติดกัน
+          const isAdjacentLane = Math.abs(Number(bufferedVehicle.data.lane) - Number(mappedData.lane)) === 1;
+
+          // 3. ตรวจสอบจำนวนเพลาเท่ากัน
+          const isAxleCountOk = bufferedVehicle.data.axles.length === mappedData.axles.length;
+
+          if (isTimeOk && isAdjacentLane && isAxleCountOk) {
+            // 4. ตรวจสอบความสอดคล้องของระยะห่างเพลา (Wheelbase) ทุก ๆ เพลา (ต่างกันไม่เกิน 30 ซม.)
+            let isWheelbaseOk = true;
+            for (let i = 1; i < mappedData.axles.length; i++) {
+              const wb1 = bufferedVehicle.data.axles[i].wheelbase;
+              const wb2 = mappedData.axles[i].wheelbase;
+              if (Math.abs(wb1 - wb2) > 30) {
+                isWheelbaseOk = false;
+                break;
+              }
+            }
+
+            // 5. ตรวจสอบความเร็วรถสอดคล้องกัน (ต่างกันไม่เกิน 15 กม./ชม.)
+            const speedDiff = Math.abs(bufferedVehicle.data.speed - mappedData.speed);
+            const isSpeedOk = speedDiff <= 15;
+
+            if (isWheelbaseOk && isSpeedOk) {
+              clearTimeout(bufferedVehicle.timeoutHandle);
+              let merged = mergeStraddlingVehicles(bufferedVehicle.data, mappedData);
+              if (merged) {
+                const leftWeights = bufferedVehicle.data.axles.map(a => a.weightLeft + a.weightRight);
+                const rightWeights = mappedData.axles.map(a => a.weightLeft + a.weightRight);
+                const mergedWeights = merged.axles.map(a => a.weight);
+                logger.info(`[Straddling] High-precision Match found! Merging InterComp vehicles. Time Diff: ${timeDiffMs}ms, Speed Diff: ${speedDiff}km/h. Left Lane ${bufferedVehicle.data.lane} [${leftWeights.join(', ')}] kg + Right Lane ${mappedData.lane} [${rightWeights.join(', ')}] kg -> Merged GVW ${merged.gvw} kg with Axles [${mergedWeights.join(', ')}] kg`);
+                
+                mappedData = merged;
+                this.straddlingBuffer.delete(key);
+                matchFound = true;
+                break; 
+              }
             }
           }
         }
@@ -314,39 +347,19 @@ class InterComp extends WSController {
         }
       }
 
-      // Perform initial snapshot search, OCR and upload BEFORE database insert
-      const findTimer = perf.timer();
-      const findResult = await this.findAndProcessSnapshots(mappedData);
-      const findMs = findTimer();
-
-      if (findResult && findResult.isExcluded) {
-        logger.warn(`[Filter] Vehicle is excluded by plate (Passenger car/Bus). Skipping insert.`);
-        perf.count("dropped_excluded_plate");
-        return;
+      if (this.config.led_enabled && this.config.led_url) {
+        sendToVMS(this.config.led_url, mappedData);
       }
-
-      sendToVMS(this.config.led_url, mappedData);
-
-      // รอรูปให้ครบก่อน insert เพื่อให้ข้อมูลและรูปปรากฏใน DB พร้อมกัน
-      const waitTimer = perf.timer();
-      const keepVehicle = await this.waitForImages(mappedData, findResult);
-      const imageWaitMs = waitTimer();
-      if (!keepVehicle) { perf.count("dropped_excluded_plate"); return; }
 
       const insertTimer = perf.timer();
       const vehicleID = await insertVehicleWithDetails(mappedData);
       const insertMs = insertTimer();
       logger.info(`Data saved successfully for Vehicle ID: ${vehicleID}`);
-      this._recordVehicleMetrics(mappedData, vehicleID, { totalMs: totalTimer(), findMs, imageWaitMs, insertMs });
 
-      if (threeDimensionBase) {
-        try {
-          const threeDimensionData = await getThreeDimension(threeDimensionBase, mappedData, vehicleID);
-          if (threeDimensionData) await insertThreeDimensionWithWarnings(threeDimensionData);
-        } catch (err) { logger.error(`Error processing threeDimension: ${err.stack || err}`); }
-      }
-
-      this.transmitVehicle(vehicleID);
+      // ทำงานเบื้องหลังแบบขนาน
+      this.processImagesAndOcrInBackground(vehicleID, mappedData, totalTimer, insertMs).catch(err => {
+        logger.error(`Error in background processing for InterComp Vehicle ID ${vehicleID}: ${err.stack || err}`);
+      });
     } catch (err) {
       perf.count("handler_error");
       logger.error(`InterComp error handling data message: ${err.stack || err}`);
@@ -406,31 +419,19 @@ class InterComp extends WSController {
     perf.count("straddle_finalized");
     try {
       logger.info(`[Straddling] Processing single part for InterComp ID: ${mappedData.id} (No partner found)`);
-      // Perform initial snapshot search and OCR
-      const findTimer = perf.timer();
-      const findResult = await this.findAndProcessSnapshots(mappedData);
-      const findMs = findTimer();
-
-      if (findResult && findResult.isExcluded) {
-        logger.warn(`[Straddling] Vehicle is excluded by plate. Skipping insert.`);
-        perf.count("dropped_excluded_plate");
-        return;
+      if (this.config.led_enabled && this.config.led_url) {
+        sendToVMS(this.config.led_url, mappedData);
       }
-
-      sendToVMS(this.config.led_url, mappedData);
-
-      const waitTimer = perf.timer();
-      const keepVehicle = await this.waitForImages(mappedData, findResult);
-      const imageWaitMs = waitTimer();
-      if (!keepVehicle) { perf.count("dropped_excluded_plate"); return; }
 
       const insertTimer = perf.timer();
       const vehicleID = await insertVehicleWithDetails(mappedData);
       const insertMs = insertTimer();
       logger.info(`[Straddling] Single part saved successfully for Vehicle ID: ${vehicleID}`);
-      this._recordVehicleMetrics(mappedData, vehicleID, { totalMs: totalTimer(), findMs, imageWaitMs, insertMs });
 
-      this.transmitVehicle(vehicleID);
+      // ทำงานเบื้องหลังแบบขนาน
+      this.processImagesAndOcrInBackground(vehicleID, mappedData, totalTimer, insertMs).catch(err => {
+        logger.error(`Error in background processing for Straddling InterComp Vehicle ID ${vehicleID}: ${err.stack || err}`);
+      });
     } catch (err) {
       perf.count("handler_error");
       logger.error(`Error in processFinalVehicle: ${err.stack || err}`);
@@ -484,25 +485,97 @@ class InterComp extends WSController {
         };
 
         const snapTimer = perf.timer();
-        await Promise.all([
-          this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, {
-            ...metadata,
-            type: "lpr",
-          }),
-          this.overviewSnapshotManager.takeSnapshot(
-            overviewSnapshotConfig.snap_code,
-            {
+        this.inFlightDownloads.add(lane);
+        try {
+          await Promise.all([
+            this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, {
               ...metadata,
-              type: "overview",
-            }
-          ),
-        ]);
+              type: "lpr",
+            }),
+            this.overviewSnapshotManager.takeSnapshot(
+              overviewSnapshotConfig.snap_code,
+              {
+                ...metadata,
+                type: "overview",
+              }
+            ),
+          ]);
+        } finally {
+          this.inFlightDownloads.delete(lane);
+        }
         perf.observe("trigger_snapshot_ms", snapTimer()); // กล้องช้า = รูปจับคู่ไม่ทัน
       } catch (err) {
         logger.error(`Error processing trigger message: ${err.stack || err}`);
       }
     } catch (err) {
       logger.error(`InterComp error handling trigger message: ${err.stack || err}`);
+    }
+  }
+
+  /**
+   * ค้นหารูปภาพ, OCR และอัปโหลดในพื้นหลังเพื่อไม่ให้บล็อก Flow หลัก
+   */
+  async processImagesAndOcrInBackground(vehicleID, mappedData, totalTimer, insertMs) {
+    try {
+      const findTimer = perf.timer();
+      const findResult = await this.findAndProcessSnapshots(mappedData);
+      const findMs = findTimer();
+
+      if (findResult && findResult.isExcluded) {
+        await this.deleteVehicleFromDatabase(vehicleID);
+        return;
+      }
+
+      const waitTimer = perf.timer();
+      const keepVehicle = await this.waitForImages(mappedData, findResult);
+      const imageWaitMs = waitTimer();
+
+      if (!keepVehicle) {
+        await this.deleteVehicleFromDatabase(vehicleID);
+        return;
+      }
+
+      // อัปเดตข้อมูลภาพและทะเบียนลง DB ย้อนหลัง
+      if (mappedData.licensePlate) {
+        await updatePlates(vehicleID, mappedData.licensePlate, mappedData.platePath, mappedData.province, mappedData.cropPath);
+      }
+      if (mappedData.overviewPath) {
+        await updateOverview(vehicleID, mappedData.overviewPath);
+      }
+
+      logger.info(`Data updated successfully for Vehicle ID: ${vehicleID}`);
+      this._recordVehicleMetrics(mappedData, vehicleID, { totalMs: totalTimer(), findMs, imageWaitMs, insertMs });
+
+      // ดึงข้อมูล 3D (ถ้ามีกำหนดไว้)
+      if (threeDimensionBase) {
+        try {
+          const threeDimensionData = await getThreeDimension(threeDimensionBase, mappedData, vehicleID);
+          if (threeDimensionData) await insertThreeDimensionWithWarnings(threeDimensionData);
+        } catch (err) { logger.error(`Error processing threeDimension: ${err.stack || err}`); }
+      }
+
+      // ส่งสัญญาณ WebSocket และส่งข้อมูลไปส่วนกลาง
+      this.transmitVehicle(vehicleID);
+    } catch (err) {
+      logger.error(`Error in processImagesAndOcrInBackground for Vehicle ID ${vehicleID}: ${err.stack || err}`);
+    }
+  }
+
+  /**
+   * ลบข้อมูลรถยนต์ออกจากฐานข้อมูลเมื่อระบุได้ว่าเป็นรถกลุ่ม Exclude ย้อนหลัง (ลบ Ghost Records)
+   */
+  async deleteVehicleFromDatabase(vehicleID) {
+    try {
+      logger.warn(`[Filter] Vehicle ID ${vehicleID} is excluded by plate on background OCR. Deleting from DB.`);
+      await pool.execute(`DELETE FROM plates WHERE vehicle_id = ?`, [vehicleID]);
+      await pool.execute(`DELETE FROM images WHERE vehicle_id = ?`, [vehicleID]);
+      await pool.execute(`DELETE FROM flags WHERE vehicle_id = ?`, [vehicleID]);
+      await pool.execute(`DELETE FROM axles WHERE vehicle_id = ?`, [vehicleID]);
+      await pool.execute(`DELETE FROM axles_after_allowance WHERE vehicle_id = ?`, [vehicleID]);
+      await pool.execute(`DELETE FROM vehicles WHERE id = ?`, [vehicleID]);
+      perf.count("dropped_excluded_plate");
+    } catch (err) {
+      logger.error(`Error deleting excluded vehicle ID ${vehicleID}: ${err.stack || err}`);
     }
   }
 }

@@ -21,6 +21,26 @@ async function ensureConfigurationSchema(promisePool) {
             console.error("[DB Schema] Error checking straddling_time_diff:", err.message);
         }
     }
+
+    // Add new dynamic matching/metrics configuration columns
+    const columns = [
+        { name: "snap_match_db_poll_ms", definition: "INT DEFAULT 1000" },
+        { name: "snap_match_max_wait_ms", definition: "INT DEFAULT 3000" },
+        { name: "trigger_history_window_ms", definition: "INT DEFAULT 3000" },
+        { name: "metrics_interval_ms", definition: "INT DEFAULT 300000" },
+        { name: "metrics_format", definition: "VARCHAR(50) DEFAULT 'pretty'" }
+    ];
+
+    for (const col of columns) {
+        try {
+            await promisePool.query(`ALTER TABLE configuration ADD COLUMN ${col.name} ${col.definition}`);
+            console.log(`[DB Schema] Checked/Added column ${col.name} to configuration`);
+        } catch (err) {
+            if (err.errno !== 1060 && err.code !== 'ER_DUP_FIELDNAME') {
+                console.error(`[DB Schema] Error checking column ${col.name}:`, err.message);
+            }
+        }
+    }
 }
 
 function createPool() {
