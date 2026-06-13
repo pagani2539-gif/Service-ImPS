@@ -1,4 +1,5 @@
 const mysql = require('mysql2');
+const perfMonitor = require('../utils/perfMonitor');
 
 let pool;
 
@@ -35,6 +36,11 @@ function createPool() {
 
     pool.on('connection', (connection) => {
         console.log('Database connection established');
+    });
+
+    // มี query ต้องรอคิว connection — ถ้าตัวเลขนี้ขึ้นบ่อยใน [Metrics] แปลว่า pool อิ่มตัว
+    pool.on('enqueue', () => {
+        perfMonitor.count('db_pool_enqueue');
     });
 
     pool.on('error', (err) => {

@@ -4,13 +4,25 @@ const fs = require("fs-extra");
 const path = require("path");
 const dayjs = require("dayjs");
 const FormData = require("form-data");
+const logger = require("./logger");
+const perf = require("./perfMonitor");
 const { snapshotRegistry, normalizeLane } = require("./snapshotRegistry");
 
-const SNAP_MATCH_POLL_MS = Number(process.env.SNAP_MATCH_POLL_MS) || 150;
+// ความถี่ขั้นต่ำของการเช็ค DB ระหว่างรอจับคู่รูป (memory เช็คแบบ event-driven แทน)
+const SNAP_MATCH_DB_POLL_MS = Number(process.env.SNAP_MATCH_DB_POLL_MS) || 1000;
 const SNAP_MATCH_MAX_WAIT_MS = Number(process.env.SNAP_MATCH_MAX_WAIT_MS) || 5000;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// โฟลเดอร์ปลายทางเปลี่ยนแค่วันละครั้งต่อ lane/type — cache ไว้ ไม่ต้อง stat ทุกรูป
+const ensuredDirs = new Set();
+async function ensureDirCached(dir) {
+  if (ensuredDirs.has(dir)) return;
+  await fs.ensureDir(dir);
+  if (ensuredDirs.size > 256) ensuredDirs.clear();
+  ensuredDirs.add(dir);
 }
 
 class SnapshotManager {
@@ -50,11 +62,11 @@ class SnapshotManager {
         filename
       );
 
-      await fs.ensureDir(path.dirname(filePath));
+      await ensureDirCached(path.dirname(filePath));
       await fs.writeFile(filePath, response.data);
 
       const stampDate = date.toDate();
-      
+
       // Register in memory FIRST to ensure it's claimable immediately
       snapshotRegistry.register({
         lane,
@@ -63,29 +75,28 @@ class SnapshotManager {
         imageUrl: filePath,
       });
 
-      // Then save to DB (we don't strictly need to await this if we want speed, 
-      // but awaiting ensures DB consistency if memory fails)
-      try {
-        await this.pool.execute(
+      // บันทึกลง DB แบบไม่บล็อก — memory คือแหล่งหลัก แถว DB ใช้เฉพาะกู้รูปหลัง restart
+      this.pool
+        .execute(
           `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
           [lane, type, stampDate, filePath]
-        );
-      } catch (dbErr) {
-        console.error(`[Snapshot] DB Insert failed for ${filename}:`, dbErr.message);
-      }
+        )
+        .catch((dbErr) => {
+          logger.error(`[Snapshot] DB Insert failed for ${filename}: ${dbErr.message}`);
+        });
 
       return { lane, type, stamp: stampDate, imageUrl: filePath };
     } catch (err) {
-      console.error(
-        `Error taking snapshot for lane ${lane}, type ${type}:`,
-        err.message
-      );
+      logger.error(`Error taking snapshot for lane ${lane}, type ${type}: ${err.message}`);
       return null;
     }
   }
 
   /**
-   * Poll until a snapshot is available or timeout (handles capture still in flight).
+   * Wait until a snapshot is available or timeout (handles capture still in flight).
+   * เช็ค memory แบบ event-driven (ตื่นทันทีเมื่อมีรูปใหม่ถูก register)
+   * เช็ค DB เฉพาะรอบแรก + ทุก SNAP_MATCH_DB_POLL_MS — แถวใน DB ที่โปรเซสนี้เพิ่ง insert
+   * อยู่ใน memory อยู่แล้วเสมอ DB จึงมีประโยชน์เฉพาะกู้รูปที่ค้างจากก่อน restart
    */
   async findSnapshots(mappedData, type) {
     const isOverview = type === "overview";
@@ -98,25 +109,35 @@ class SnapshotManager {
     }
 
     const deadline = Date.now() + SNAP_MATCH_MAX_WAIT_MS;
+    const lane = normalizeLane(mappedData.lane);
     let attempts = 0;
+    let lastDbCheck = 0;
 
     while (Date.now() <= deadline) {
       attempts++;
-      const found = await this._findSnapshotOnce(mappedData, type);
+      const now = Date.now();
+      const checkDb = lastDbCheck === 0 || now - lastDbCheck >= SNAP_MATCH_DB_POLL_MS;
+      if (checkDb) lastDbCheck = now;
+
+      const found = await this._findSnapshotOnce(mappedData, type, { checkDb });
       if (found) return found;
-      if (Date.now() + SNAP_MATCH_POLL_MS > deadline) break;
-      await sleep(SNAP_MATCH_POLL_MS);
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      await snapshotRegistry.waitForRegister(lane, type, Math.min(remaining, SNAP_MATCH_DB_POLL_MS));
     }
 
     const targetTime = dayjs(mappedData.stamp).format("HH:mm:ss.SSS");
-    console.warn(`[Snapshot] Not found after ${attempts} attempts (${SNAP_MATCH_MAX_WAIT_MS}ms). Type: ${type}, Target: ${targetTime}, Lane: ${mappedData.lane}`);
+    logger.warn(`[Snapshot] Not found after ${attempts} attempts (${SNAP_MATCH_MAX_WAIT_MS}ms). Type: ${type}, Target: ${targetTime}, Lane: ${mappedData.lane}`);
     return null;
   }
 
-  async _findSnapshotOnce(mappedData, type) {
+  async _findSnapshotOnce(mappedData, type, { checkDb = true } = {}) {
     const lane = normalizeLane(mappedData.lane);
-    const minMs = this.config.minimum_search || 2000;
-    const maxMs = this.config.maximum_search || 8000;
+    // ช่วงเวลาจับคู่รูป↔รถ — override ได้ด้วย env โดยไม่ต้องแก้ค่าใน DB (minimum_search/maximum_search)
+    // forward (maxMs) กว้างไป = รถคันหนึ่งคว้ารูปของคันถัดไป → ภาพคนละคัน/ภาพท้ายรถ
+    const minMs = Number(process.env.SNAP_MATCH_BACK_MS) || this.config.minimum_search || 2000;
+    const maxMs = Number(process.env.SNAP_MATCH_FWD_MS) || this.config.maximum_search || 8000;
 
     const fromMemory = snapshotRegistry.claimClosest(
       { ...mappedData, lane },
@@ -125,10 +146,15 @@ class SnapshotManager {
       maxMs
     );
     if (fromMemory) {
+      // วัด offset (รูป − รถ, ms) ไว้จูน window: ดู p95/max ของ snap_offset_*_ms ใน [Metrics]
+      // แล้วตั้ง SNAP_MATCH_FWD_MS ให้พอครอบ p95 ก็พอ (แคบสุดที่ยังจับคู่ถูก)
+      perf.observe(`snap_offset_${type}_ms`, dayjs(fromMemory.stamp).valueOf() - dayjs(mappedData.stamp).valueOf());
       // Use background delete to not block processing
       this._deleteSnapshotRow(fromMemory.imageUrl).catch(() => {});
       return fromMemory;
     }
+
+    if (!checkDb) return null;
 
     try {
       const targetStamp = dayjs(mappedData.stamp).format(
@@ -169,10 +195,7 @@ class SnapshotManager {
 
       return null;
     } catch (err) {
-      console.error(
-        `[Snapshot] DB Query error for lane ${lane}, type ${type}:`,
-        err.message
-      );
+      logger.error(`[Snapshot] DB Query error for lane ${lane}, type ${type}: ${err.message}`);
       return null;
     }
   }
@@ -183,13 +206,13 @@ class SnapshotManager {
         imageUrl,
       ]);
     } catch (err) {
-      console.error("Error deleting used snapshot row:", err.message);
+      logger.error(`Error deleting used snapshot row: ${err.message}`);
     }
   }
 
   async moveFile(src, dest) {
     try {
-      if (!fs.existsSync(src)) {
+      if (!(await fs.pathExists(src))) {
         throw new Error(`Source file does not exist: ${src}`);
       }
       await fs.ensureDir(path.dirname(dest));
@@ -202,7 +225,7 @@ class SnapshotManager {
 
   async uploadImage(filePath) {
     try {
-      if (!fs.existsSync(filePath)) {
+      if (!(await fs.pathExists(filePath))) {
         throw new Error(`File does not exist: ${filePath}`);
       }
 
@@ -224,7 +247,7 @@ class SnapshotManager {
       }
       throw new Error("Response does not contain fileUrl");
     } catch (err) {
-      console.error(`[Upload] Failed for ${path.basename(filePath)}: ${err.message}`);
+      logger.error(`[Upload] Failed for ${path.basename(filePath)}: ${err.message}`);
       return {
         success: false,
         message: `Error uploading image: ${err.message}`,
