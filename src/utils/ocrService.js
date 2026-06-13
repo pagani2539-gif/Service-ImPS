@@ -3,6 +3,7 @@ const axios = require("axios");
 const sharp = require("sharp");
 const fs = require("fs-extra");
 const path = require("path");
+const logger = require("./logger");
 
 /**
  * แปลง position จาก OCR เป็น { left, top, width, height }
@@ -139,13 +140,16 @@ module.exports = {
 
       const plate = response.data?.plate;
       if (!plate) {
+        logger.info(`[OCR] No plate detected (${path.basename(fullPath)})`);
         return null;
       }
 
       const license_plate = plate.license_plate;
       if (!license_plate) {
+        logger.info(`[OCR] Plate region found but unreadable (${path.basename(fullPath)})`);
         return null;
       }
+      logger.info(`[OCR] Plate: ${license_plate} (${plate.province || "N/A"}) (${path.basename(fullPath)})`);
 
       let crop_path = null;
       if (plate.position) {
@@ -165,13 +169,9 @@ module.exports = {
       };
     } catch (err) {
       if (err.response) {
-        console.error(
-          "Error sending snapshots to OCR:",
-          err.response.status,
-          err.message
-        );
+        logger.error(`[OCR] Error sending snapshot to OCR: ${err.response.status} ${err.message}`);
       } else {
-        console.error("Error sending snapshots to OCR:", err.message);
+        logger.error(`[OCR] Error sending snapshot to OCR: ${err.message}`);
       }
       return null;
     }
@@ -192,7 +192,7 @@ module.exports = {
     try {
       const sourcePath = resolveImagePath(imagePath, fallbackPath);
       if (!sourcePath) {
-        console.warn("OCR crop skipped: image file not found:", imagePath);
+        logger.warn(`[OCR] Crop skipped: image file not found: ${imagePath}`);
         return null;
       }
 
@@ -203,10 +203,7 @@ module.exports = {
 
       const clamped = await clampRectToImage(sourcePath, rect);
       if (!clamped) {
-        console.warn(
-          "OCR crop skipped: region outside image or zero size",
-          JSON.stringify(position)
-        );
+        logger.warn(`[OCR] Crop skipped: region outside image or zero size ${JSON.stringify(position)}`);
         return null;
       }
 
@@ -216,7 +213,7 @@ module.exports = {
 
       return croppedImagePath;
     } catch (err) {
-      console.error("Error cropping image:", err.message);
+      logger.error(`[OCR] Error cropping image: ${err.message}`);
       return null;
     }
   },

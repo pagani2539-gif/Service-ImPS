@@ -17,9 +17,10 @@ const {
   formatLicensePlate,
   isBusByWheelbase,
   mergeStraddlingVehicles,
-  isReverseDirection
+  isReverseDirection,
+  ignoreGVW,
+  isIgnoredLength
 } = require("../utils/mappers/mapDataLogger");
-const { ignoreGVW, isIgnoredLength } = require("../utils/mappers/mapInterComp");
 const SnapshotManager = require("../utils/snapshotManager");
 const { snapshotRegistry, normalizeLane } = require("../utils/snapshotRegistry");
 const dayjs = require("dayjs");
@@ -81,8 +82,6 @@ class DataLogger extends WSController {
     this.ocrResultCache = new Map();
     // กัน data message ซ้ำ (เช่น controller ส่งซ้ำหลัง WS reconnect) — Key: "lane:id"
     this.recentMessageIds = new Map();
-    // เก็บสถานะ trigger ที่กำลังดาวน์โหลดอยู่เพื่อทำ Zero-Delay Fallback
-    this.inFlightDownloads = new Set();
   }
 
   async stop() {
@@ -116,33 +115,33 @@ class DataLogger extends WSController {
     logger.info(`🚗 [Vehicle Saved] ID: ${mappedData.id} | VehicleID: ${vehicleID} | Class: ${mappedData.vehicleClassID} | Plate: ${mappedData.licensePlate || "N/A"} (${mappedData.province || "N/A"}) | GVW: ${mappedData.gvw} kg | Speed: ${mappedData.speed} km/h | Lane: ${mappedData.lane} | Total: ${totalMs}ms (Find: ${findMs}ms, Wait: ${imageWaitMs}ms, Insert: ${insertMs}ms) | Latency: ${sensorToDbMs}ms`);
   }
 
+  // [Instrument] ลายเซ็น "ด้านศูนย์" ต่อเพลา — ฝั่งที่เซ็นเซอร์อ่านได้ ~0 (ล้อเลยขอบเลน)
+  // ใช้พิสูจน์สมมุติฐานจับคู่คร่อมเลนด้วยฟิสิกส์: เลนซ้าย R0 ↔ เลนขวา L0 = รถคันเดียวคร่อมขอบ
+  _zeroSideSignature(data, zeroKg = 100) {
+    return (data.axles || [])
+      .map((a, i) => {
+        const l0 = (a.weightLeft || 0) < zeroKg;
+        const r0 = (a.weightRight || 0) < zeroKg;
+        const code = l0 && r0 ? "X" : l0 ? "L0" : r0 ? "R0" : "ok";
+        return `A${i + 1}:${code}`;
+      })
+      .join(" ");
+  }
+
   // ฟังก์ชันสำหรับค้นหาและประมวลผล snapshots
   async findAndProcessSnapshots(mappedData, existingLpr = null, existingOverview = null) {
-    const lane = normalizeLane(mappedData.lane);
-    const minMs = Number(process.env.SNAP_MATCH_BACK_MS) || this.config.minimum_search || 2000;
-    const maxMs = Number(process.env.SNAP_MATCH_FWD_MS) || this.config.maximum_search || 8000;
-    const hasImageInRegistry = snapshotRegistry.hasUnusedImageInWindow(lane, "lpr", mappedData.stamp, minMs, maxMs);
-    const hasActiveDownload = this.inFlightDownloads.has(lane);
-    // หากมีรูปใน memory หรือกำลังดาวน์โหลดอยู่ ให้ถือว่ามี Trigger จริงและทำการรอ
-    const hasRecentTrigger = hasImageInRegistry || hasActiveDownload;
-
     // 1. เริ่มค้นหาเฉพาะส่วนที่ยังไม่มีข้อมูล (รองรับการ Retry)
     // Smart Retry: ถ้ามี snapshot เดิมที่เคยหาเจอแล้วแต่ upload พลาด ให้ใช้ใบเดิม
-    // หากไม่มีประวัติการ Trigger ล่าสุด (hasRecentTrigger เป็น false) ให้ใช้ _findSnapshotOnce เพื่อเช็คทันทีแบบไม่มีดีเลย์
     const lprSearchPromise = !mappedData.platePath 
       ? (existingLpr 
           ? Promise.resolve(existingLpr) 
-          : (hasRecentTrigger 
-              ? this.lprSnapshotManager.findSnapshots(mappedData, "lpr") 
-              : this.lprSnapshotManager._findSnapshotOnce(mappedData, "lpr")))
+          : this.lprSnapshotManager.findSnapshots(mappedData, "lpr"))
       : Promise.resolve(null);
       
     const overviewSearchPromise = !mappedData.overviewPath
       ? (existingOverview 
           ? Promise.resolve(existingOverview) 
-          : (hasRecentTrigger 
-              ? this.overviewSnapshotManager.findSnapshots(mappedData, "overview") 
-              : this.overviewSnapshotManager._findSnapshotOnce(mappedData, "overview")))
+          : this.overviewSnapshotManager.findSnapshots(mappedData, "overview"))
       : Promise.resolve(null);
 
     let lprSnapshotsFound = existingLpr;
@@ -151,17 +150,6 @@ class DataLogger extends WSController {
     // 2. จัดการส่วน LPR
     const lprProcessPromise = lprSearchPromise.then(async (lprSnapshots) => {
       let activeLprSnapshots = lprSnapshots;
-
-      // Fallback: If no pre-triggered LPR snapshot is found, take a live snapshot on-demand
-      if (!activeLprSnapshots && !mappedData.platePath) {
-        const lane = normalizeLane(mappedData.lane);
-        logger.warn(`[Snapshot Fallback] LPR snapshot not found. Triggering on-demand snapshot for lane ${lane}...`);
-        perf.count("snap_fallback_lpr"); // ถ่ายสด = เสี่ยงได้ภาพท้ายรถ; ถ้าตัวเลขนี้สูง = matching พลาดบ่อย
-        const lprSnapshotConfig = this.lprConfigByLane.get(lane);
-        if (lprSnapshotConfig) {
-          activeLprSnapshots = await this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, { stamp: new Date(), lane, type: "lpr" });
-        }
-      }
 
       if (!activeLprSnapshots) return null;
       lprSnapshotsFound = activeLprSnapshots;
@@ -206,17 +194,6 @@ class DataLogger extends WSController {
     const overviewProcessPromise = overviewSearchPromise.then(async (overviewSnapshots) => {
       let activeOverviewSnapshots = overviewSnapshots;
 
-      // Fallback: If no pre-triggered Overview snapshot is found, take a live snapshot on-demand
-      if (!activeOverviewSnapshots && !mappedData.overviewPath) {
-        const lane = normalizeLane(mappedData.lane);
-        logger.warn(`[Snapshot Fallback] Overview snapshot not found. Triggering on-demand snapshot for lane ${lane}...`);
-        perf.count("snap_fallback_overview");
-        const overviewSnapshotConfig = this.overviewConfigByLane.get(lane);
-        if (overviewSnapshotConfig) {
-          activeOverviewSnapshots = await this.overviewSnapshotManager.takeSnapshot(overviewSnapshotConfig.snap_code, { stamp: new Date(), lane, type: "overview" });
-        }
-      }
-
       if (!activeOverviewSnapshots) return null;
       overviewSnapshotsFound = activeOverviewSnapshots;
       const uploadResult = await this.overviewSnapshotManager.uploadImage(activeOverviewSnapshots.imageUrl, "overview", activeOverviewSnapshots.buffer);
@@ -253,18 +230,27 @@ class DataLogger extends WSController {
         logger.warn(`[Dedup] Duplicate data message dropped (Lane: ${rawData.LaneNo}, ID: ${ID})`);
         return;
       }
+      logger.info(`[RX] (ID: ${ID}, Lane: ${rawData.LaneNo}) Received data message`);
       let mappedData = mapDataLogger(rawData);
-      if(isReverseDirection(mappedData.direction)) { perf.count("dropped_reverse"); return; }
-      if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) { perf.count("dropped_gvw"); return; }
+      if(isReverseDirection(mappedData.direction)) {
+        logger.info(`[Filter] Dropped reverse direction (ID: ${ID}, Lane: ${mappedData.lane}, Direction: ${mappedData.direction})`);
+        perf.count("dropped_reverse"); return;
+      }
+      if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) {
+        logger.info(`[Filter] Dropped by GVW (ID: ${ID}, Lane: ${mappedData.lane}, GVW: ${mappedData.gvw}kg)`);
+        perf.count("dropped_gvw"); return;
+      }
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
       mappedData = setViolation(mappedData, this.vehicleClasses, [0, 19]);
       mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
       mappedData = mapWarningFlag(mappedData);
       mappedData = mapErrorFlag(mappedData);
+      logger.info(`[Pipeline] (ID: ${ID}, Lane: ${mappedData.lane}) Classified: Class ${mappedData.vehicleClassID}, GVW ${mappedData.gvw}kg, Speed ${mappedData.speed}km/h, Axles ${mappedData.axles.length}, Direction ${mappedData.direction}`);
 
       if ([1, 2].includes(mappedData.vehicleClassID)) {
         if (isIgnoredLength(mappedData.axles[1].wheelbase, this.config.vehicle_length_ignored)) {
+          logger.info(`[Filter] Dropped by length (ID: ${ID}, Lane: ${mappedData.lane}, Wheelbase: ${mappedData.axles[1].wheelbase})`);
           perf.count("dropped_length");
           return;
         }
@@ -284,51 +270,61 @@ class DataLogger extends WSController {
 
         const maxDiff = this.config.straddling_time_diff || 3;
 
+        // [Instrument] log รถที่ติดธงคร่อมเลน + ลายเซ็นด้านศูนย์ (ไว้พิสูจน์การจับคู่ด้วยฟิสิกส์ - ชั้น 3)
+        logger.info(`[Straddling][Candidate] Incoming (ID: ${mappedData.id}, Lane: ${mappedData.lane}, Axles: ${mappedData.axles.length}, Speed: ${Number(mappedData.speed).toFixed(1)}km/h) ZeroSide: ${this._zeroSideSignature(mappedData)} | Buffer: ${this.straddlingBuffer.size}`);
+
         // ค้นหาคู่ใน Buffer (เทียบเวลา + เลนติดกัน + จำนวนเพลา + ระยะฐานล้อ + ความเร็ว)
         for (let [key, bufferedVehicle] of this.straddlingBuffer) {
           const bufferedTime = dayjs(bufferedVehicle.data.stamp);
-          
-          // 1. ตรวจสอบเวลาห่างกันระดับมิลลิวินาที (ไม่เกิน 1 วินาที หรือตาม config)
+
+          // 1. เวลาห่างกันระดับมิลลิวินาที (ไม่เกิน 1 วินาที หรือตาม config)
           const timeDiffMs = Math.abs(currentTime.diff(bufferedTime, 'millisecond'));
           const maxTimeDiffMs = maxDiff * 1000;
           const isTimeOk = timeDiffMs <= Math.min(1000, maxTimeDiffMs);
 
-          // 2. ตรวจสอบหมายเลขเลนว่าต้องอยู่ติดกัน
+          // 2. หมายเลขเลนต้องอยู่ติดกัน
           const isAdjacentLane = Math.abs(Number(bufferedVehicle.data.lane) - Number(mappedData.lane)) === 1;
 
-          // 3. ตรวจสอบจำนวนเพลาเท่ากัน
+          // 3. จำนวนเพลาเท่ากัน
           const isAxleCountOk = bufferedVehicle.data.axles.length === mappedData.axles.length;
 
-          if (isTimeOk && isAdjacentLane && isAxleCountOk) {
-            // 4. ตรวจสอบความสอดคล้องของระยะห่างเพลา (Wheelbase) ทุก ๆ เพลา (ต่างกันไม่เกิน 30 ซม.)
-            let isWheelbaseOk = true;
+          // 5. ความเร็วสอดคล้องกัน (ต่างกันไม่เกิน 15 กม./ชม.) — คำนวณเสมอเพื่อเก็บ delta
+          const speedDiff = Math.abs(bufferedVehicle.data.speed - mappedData.speed);
+          const isSpeedOk = speedDiff <= 15;
+
+          // 4. ระยะฐานล้อทุกเพลาต่างกันไม่เกิน 30 ซม. (เทียบได้เฉพาะเมื่อจำนวนเพลาตรงกัน)
+          let wheelbaseMaxDiff = null;
+          let isWheelbaseOk = false;
+          if (isAxleCountOk) {
+            wheelbaseMaxDiff = 0;
             for (let i = 1; i < mappedData.axles.length; i++) {
-              const wb1 = bufferedVehicle.data.axles[i].wheelbase;
-              const wb2 = mappedData.axles[i].wheelbase;
-              if (Math.abs(wb1 - wb2) > 30) {
-                isWheelbaseOk = false;
-                break;
-              }
+              const d = Math.abs(bufferedVehicle.data.axles[i].wheelbase - mappedData.axles[i].wheelbase);
+              if (d > wheelbaseMaxDiff) wheelbaseMaxDiff = d;
             }
+            isWheelbaseOk = wheelbaseMaxDiff <= 30;
+          }
 
-            // 5. ตรวจสอบความเร็วรถสอดคล้องกัน (ต่างกันไม่เกิน 15 กม./ชม.)
-            const speedDiff = Math.abs(bufferedVehicle.data.speed - mappedData.speed);
-            const isSpeedOk = speedDiff <= 15;
+          // [Instrument] log delta จริงของทุกคู่ที่สแกน (ผ่าน/ไม่ผ่านแต่ละเงื่อนไข) ไว้เก็บการกระจายไปจูน threshold (ชั้น 1)
+          logger.info(`[Straddling][Compare] Buffered Lane ${bufferedVehicle.data.lane} (ID: ${bufferedVehicle.data.id}) vs Incoming Lane ${mappedData.lane} (ID: ${mappedData.id}) | dTime ${timeDiffMs}ms[${isTimeOk ? "Y" : "N"}] Adjacent[${isAdjacentLane ? "Y" : "N"}] Axles ${bufferedVehicle.data.axles.length}vs${mappedData.axles.length}[${isAxleCountOk ? "Y" : "N"}] dWheelbase ${wheelbaseMaxDiff === null ? "-" : wheelbaseMaxDiff + "cm"}[${isWheelbaseOk ? "Y" : "N"}] dSpeed ${speedDiff.toFixed(1)}km/h[${isSpeedOk ? "Y" : "N"}]`);
 
-            if (isWheelbaseOk && isSpeedOk) {
-              clearTimeout(bufferedVehicle.timeoutHandle);
-              let merged = mergeStraddlingVehicles(bufferedVehicle.data, mappedData);
-              if (merged) {
-                const leftWeights = bufferedVehicle.data.axles.map(a => a.weightLeft + a.weightRight);
-                const rightWeights = mappedData.axles.map(a => a.weightLeft + a.weightRight);
-                const mergedWeights = merged.axles.map(a => a.weight);
-                logger.info(`[Straddling] High-precision Match found! Merging vehicles. Time Diff: ${timeDiffMs}ms, Speed Diff: ${speedDiff}km/h. Left Lane ${bufferedVehicle.data.lane} [${leftWeights.join(', ')}] kg + Right Lane ${mappedData.lane} [${rightWeights.join(', ')}] kg -> Merged GVW ${merged.gvw} kg with Axles [${mergedWeights.join(', ')}] kg`);
-                
-                mappedData = merged;
-                this.straddlingBuffer.delete(key);
-                matchFound = true;
-                break; 
-              }
+          // เงื่อนไขตัดสินใจ merge — เทียบเท่าของเดิม (isWheelbaseOk เป็น false เมื่อเพลาไม่ตรง)
+          if (isTimeOk && isAdjacentLane && isAxleCountOk && isWheelbaseOk && isSpeedOk) {
+            clearTimeout(bufferedVehicle.timeoutHandle);
+            let merged = mergeStraddlingVehicles(bufferedVehicle.data, mappedData);
+            if (merged) {
+              const leftWeights = bufferedVehicle.data.axles.map(a => a.weightLeft + a.weightRight);
+              const rightWeights = mappedData.axles.map(a => a.weightLeft + a.weightRight);
+              const mergedWeights = merged.axles.map(a => a.weight);
+              logger.info(`[Straddling] High-precision Match found! Merging vehicles. Time Diff: ${timeDiffMs}ms, Speed Diff: ${speedDiff}km/h. Left Lane ${bufferedVehicle.data.lane} [${leftWeights.join(', ')}] kg + Right Lane ${mappedData.lane} [${rightWeights.join(', ')}] kg -> Merged GVW ${merged.gvw} kg with Axles [${mergedWeights.join(', ')}] kg`);
+
+              mappedData = merged;
+              // คำนวณ violation/ESAL ใหม่บนน้ำหนักรวม (ก่อน merge คำนวณบนน้ำหนักครึ่งเดียว → รถน้ำหนักเกินจะถูกบันทึกว่าผ่าน)
+              mappedData = setViolation(mappedData, this.vehicleClasses, [0, 19]);
+              mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
+              logger.info(`[Straddling] Recalculated after merge (ID: ${mappedData.id}): GVW ${mappedData.gvw}kg, Violation ${mappedData.violation}, Overweight ${Number(mappedData.overweight_percentage || 0).toFixed(1)}%`);
+              this.straddlingBuffer.delete(key);
+              matchFound = true;
+              break;
             }
           }
         }
@@ -342,25 +338,28 @@ class DataLogger extends WSController {
               this.straddlingBuffer.delete(bufferKey);
               await this.processFinalVehicle(pending.data);
             }
-          }, maxDiff * 1000); 
+          }, maxDiff * 1000);
 
           this.straddlingBuffer.set(bufferKey, {
             data: mappedData,
             timeoutHandle: timeoutHandle
           });
+          // [Instrument] เข้า buffer รอคู่ — ถ้าไม่มีคู่มาใน maxDiff วิ จะถูกบันทึกเป็นรถ "ครึ่งคัน"
+          logger.info(`[Straddling][Buffered] No partner yet (ID: ${mappedData.id}, Lane: ${mappedData.lane}) ZeroSide: ${this._zeroSideSignature(mappedData)} — holding ${maxDiff}s`);
           perf.count("straddle_buffered");
           return; // หยุดรอคู่ของมัน
         }
       }
 
       if (this.config.led_enabled && this.config.led_url) {
+        logger.info(`[LED] (ID: ${mappedData.id}, Lane: ${mappedData.lane}) Dispatching to VMS`);
         sendToVMS(this.config.led_url, mappedData);
       }
 
       const insertTimer = perf.timer();
       const vehicleID = await insertVehicleWithDetails(mappedData);
       const insertMs = insertTimer();
-      logger.info(`Data saved successfully for Vehicle ID: ${vehicleID}`);
+      logger.info(`Data saved successfully for Vehicle ID: ${vehicleID} (ID: ${mappedData.id})`);
 
       // ย้ายส่วนประมวลผลรูปภาพและส่งข้อมูลส่วนกลางไปทำงานเป็น Asynchronous Background Task
       this.processImagesAndOcrInBackground(vehicleID, mappedData, totalTimer, insertMs).catch(err => {
@@ -377,6 +376,7 @@ class DataLogger extends WSController {
   // หน่วง 150ms กัน browser ขอรูปก่อนที่ image server จะเขียนไฟล์เสร็จ (ค่าเดิม) โดยไม่ค้าง handler
   transmitVehicle(vehicleID) {
     setTimeout(() => {
+      logger.info(`[Transmit] (VehicleID: ${vehicleID}) Dispatching to WS + central`);
       sendToWebSocket({ vehicleID });
       sendToTransmission(transmissionUrl, { vehicleID });
     }, 150);
@@ -424,7 +424,7 @@ class DataLogger extends WSController {
     perf.enter();
     perf.count("straddle_finalized");
     try {
-      logger.info(`[Straddling] Processing single part for ID: ${mappedData.id} (No partner found)`);
+      logger.warn(`[Straddling][Orphan] No partner found for ID: ${mappedData.id} (Lane: ${mappedData.lane}) ZeroSide: ${this._zeroSideSignature(mappedData)} — saving HALF-weight record (GVW ${mappedData.gvw}kg)`);
       if (this.config.led_enabled && this.config.led_url) {
         sendToVMS(this.config.led_url, mappedData);
       }
@@ -486,15 +486,10 @@ class DataLogger extends WSController {
           const metadata = { stamp, lane };
 
           const snapTimer = perf.timer();
-          this.inFlightDownloads.add(lane);
-          try {
-            await Promise.all([
-              this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, { ...metadata, type: "lpr" }),
-              this.overviewSnapshotManager.takeSnapshot(overviewSnapshotConfig.snap_code, { ...metadata, type: "overview" }),
-            ]);
-          } finally {
-            this.inFlightDownloads.delete(lane);
-          }
+          await Promise.all([
+            this.lprSnapshotManager.takeSnapshot(lprSnapshotConfig.snap_code, { ...metadata, type: "lpr" }),
+            this.overviewSnapshotManager.takeSnapshot(overviewSnapshotConfig.snap_code, { ...metadata, type: "overview" }),
+          ]);
           perf.observe("trigger_snapshot_ms", snapTimer()); // กล้องช้า = รูปจับคู่ไม่ทัน
         } catch (err) { logger.error(`Error processing trigger message: ${err.stack || err}`); }
       }
@@ -506,9 +501,11 @@ class DataLogger extends WSController {
    */
   async processImagesAndOcrInBackground(vehicleID, mappedData, totalTimer, insertMs) {
     try {
+      logger.info(`[Pipeline] (ID: ${mappedData.id}, VehicleID: ${vehicleID}) Background start (find images + OCR)`);
       const findTimer = perf.timer();
       const findResult = await this.findAndProcessSnapshots(mappedData);
       const findMs = findTimer();
+      logger.info(`[Pipeline] (ID: ${mappedData.id}, VehicleID: ${vehicleID}) Snapshots resolved: lpr=${mappedData.platePath ? "Y" : "N"}, overview=${mappedData.overviewPath ? "Y" : "N"}`);
 
       if (findResult && findResult.isExcluded) {
         await this.deleteVehicleFromDatabase(vehicleID);
@@ -524,9 +521,15 @@ class DataLogger extends WSController {
         return;
       }
 
-      // อัปเดตข้อมูลภาพและทะเบียนลง DB ย้อนหลัง
-      if (mappedData.licensePlate) {
-        await updatePlates(vehicleID, mappedData.licensePlate, mappedData.platePath, mappedData.province, mappedData.cropPath);
+      // อัปเดตข้อมูลภาพและทะเบียนลง DB ย้อนหลัง (บันทึกภาพด้วยแม้จะอ่านตัวเลขทะเบียนไม่ได้)
+      if (mappedData.licensePlate || mappedData.platePath) {
+        await updatePlates(
+          vehicleID,
+          mappedData.licensePlate || null,
+          mappedData.platePath || null,
+          mappedData.province || null,
+          mappedData.cropPath || null
+        );
       }
       if (mappedData.overviewPath) {
         await updateOverview(vehicleID, mappedData.overviewPath);

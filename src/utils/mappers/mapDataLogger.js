@@ -555,6 +555,7 @@ function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
   mergedData.province = vehicleLeft.province || vehicleRight.province || "";
   
   mergedData.isStraddlingMerged = true; // flag ไว้ว่าเกิดจากการรวมข้อมูล
+  mergedData.originalLanes = [vehicleLeft.lane, vehicleRight.lane];
 
   return mergedData;
 }
@@ -569,6 +570,38 @@ function isReverseDirection(direction) {
   return direction === 1;
 }
 
+/**
+ * Check if the GVW should be ignored (too light / no data).
+ * @param {Number} gvw - Gross vehicle weight.
+ * @param {Number} gvwIgnored - Minimum GVW threshold below which the record is dropped.
+ * @returns {Boolean} - true if the record should be ignored.
+ */
+function ignoreGVW(gvw, gvwIgnored) {
+  if (!gvw || typeof gvw === "undefined") return true; // Ignore if no GVW data
+  if (gvw < gvwIgnored) {
+    return true;
+  }
+  return false; // GVW is valid
+}
+
+/**
+ * Check if the vehicle's wheelbase is below the minimum length (ignored).
+ * @param {Number} wheelbase - The wheelbase of the vehicle.
+ * @param {Number} minLength - The minimum wheelbase length to not be ignored.
+ * @returns {Boolean} - true if the wheelbase is less than the minimum length.
+ */
+function isIgnoredLength(wheelbase, minLength) {
+  if (
+    !wheelbase ||
+    typeof wheelbase !== "number" ||
+    !minLength ||
+    typeof minLength !== "number"
+  ) {
+    return false; // Invalid input
+  }
+  return wheelbase < minLength;
+}
+
 module.exports = {
   mapDataLogger,
   classifyVehicle,
@@ -581,5 +614,7 @@ module.exports = {
   formatLicensePlate,
   isBusByWheelbase,
   mergeStraddlingVehicles,
-  isReverseDirection
+  isReverseDirection,
+  ignoreGVW,
+  isIgnoredLength
 };

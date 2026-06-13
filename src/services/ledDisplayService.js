@@ -20,7 +20,7 @@ async function sendToVMS(url, data) {
         "Content-Type": "application/json", // Optional: Specify content type
       },
     });
-    logger.debug("sendToVMS successful", { response: response.data });
+    logger.info("[LED] sendToVMS successful", { response: response.data });
     return response.data;
   } catch (error) {
     logger.error(`Error in sendToVMS request: ${error.message}`);
@@ -46,8 +46,7 @@ async function createAndSendLedDisplayImage(
     // Extract only the integer part from laneNo
     // const sanitizedLaneNo = parseInt(laneNo.match(/\d+/)?.[0] || "0", 10);
 
-    console.log("Overview Path:", overviewPath);
-    console.log("condithion Path:", conditionImage1);
+    logger.debug(`[LED] Overview Path: ${overviewPath}, Condition Path: ${conditionImage1}`);
     // Resize the overview image (top 80%)
     const topImageBuffer = await sharp(overviewPath)
       .resize(totalWidth, topHeight)
@@ -89,18 +88,18 @@ async function createAndSendLedDisplayImage(
           holding: 9000, // Display duration in milliseconds
         };
         const response = await axios.post(ledServerUrl, payload);
-        console.log("LED display data sent successfully:", response.data);
+        logger.info(`[LED] Display data sent successfully (lane ${laneNo})`, { response: response.data });
       }
 
       // Save the image locally after a successful POST
       await sharp(finalImageBuffer).toFile(outputPath);
     } catch (postError) {
-      console.error("Cannot send LED data to LED server:", postError.message);
+      logger.error(`[LED] Cannot send LED data to LED server: ${postError.message}`);
     }
   } catch (error) {
-    console.error("Error creating or sending LED display image:", error);
+    logger.error(`[LED] Error creating or sending LED display image: ${error.stack || error}`);
   } finally {
-    console.log(`[PERF] createAndSendLedDisplayImage took ${Date.now() - startTime}ms`);
+    logger.debug(`[LED] createAndSendLedDisplayImage took ${Date.now() - startTime}ms`);
   }
 }
 

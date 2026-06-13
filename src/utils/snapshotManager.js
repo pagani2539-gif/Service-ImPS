@@ -113,7 +113,9 @@ class SnapshotManager {
     const dbPollMs = Number(process.env.SNAP_MATCH_DB_POLL_MS) || this.config.snap_match_db_poll_ms || DEFAULT_SNAP_MATCH_DB_POLL_MS;
 
     const deadline = Date.now() + maxWaitMs;
-    const lane = normalizeLane(mappedData.lane);
+    const lanes = (mappedData.isStraddlingMerged && Array.isArray(mappedData.originalLanes))
+      ? mappedData.originalLanes.map(normalizeLane)
+      : [normalizeLane(mappedData.lane)];
     let attempts = 0;
     let lastDbCheck = 0;
 
@@ -123,16 +125,42 @@ class SnapshotManager {
       const checkDb = lastDbCheck === 0 || now - lastDbCheck >= dbPollMs;
       if (checkDb) lastDbCheck = now;
 
-      const found = await this._findSnapshotOnce(mappedData, type, { checkDb });
-      if (found) return found;
+      // Search across all possible lanes
+      for (const currentLane of lanes) {
+        const found = await this._findSnapshotOnce({ ...mappedData, lane: currentLane }, type, { checkDb });
+        if (found) {
+          const offsetMs = dayjs(found.stamp).valueOf() - dayjs(mappedData.stamp).valueOf();
+          logger.info(`[Snapshot] Found ${type} (ID: ${mappedData.id}, lane ${currentLane}, offset ${offsetMs >= 0 ? "+" : ""}${offsetMs}ms, attempts ${attempts})`);
+          return found;
+        }
+      }
 
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
-      await snapshotRegistry.waitForRegister(lane, type, Math.min(remaining, dbPollMs));
+
+      // Wait for register on any of the lanes
+      if (lanes.length > 1) {
+        await Promise.race(
+          lanes.map((currentLane) =>
+            snapshotRegistry.waitForRegister(
+              currentLane,
+              type,
+              Math.min(remaining, dbPollMs)
+            )
+          )
+        );
+      } else {
+        await snapshotRegistry.waitForRegister(
+          lanes[0],
+          type,
+          Math.min(remaining, dbPollMs)
+        );
+      }
     }
 
     const targetTime = dayjs(mappedData.stamp).format("HH:mm:ss.SSS");
-    logger.warn(`[Snapshot] Not found after ${attempts} attempts (${maxWaitMs}ms). Type: ${type}, Target: ${targetTime}, Lane: ${mappedData.lane}`);
+    const searchedLanes = lanes.join(",");
+    logger.warn(`[Snapshot] Not found after ${attempts} attempts (${maxWaitMs}ms). Type: ${type}, Target: ${targetTime}, Lane: ${searchedLanes}`);
     return null;
   }
 
@@ -250,6 +278,7 @@ class SnapshotManager {
       });
 
       if (response.data && response.data.fileUrl) {
+        logger.info(`[Upload] OK ${type || "image"} (${fileName})`);
         return { success: true, data: response.data };
       }
       throw new Error("Response does not contain fileUrl");

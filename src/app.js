@@ -12,7 +12,6 @@ axios.defaults.httpsAgent = new https.Agent({ keepAlive: true });
 require("./services/snapshotCleanupService");
 
 const DataLogger = require("./controllers/DataLogger");
-const InterComp = require("./controllers/InterComp");
 const { getConfiguration,checkForConfigUpdates } = require("./services/configurationService");
 const {
   getVehicleClasses,
@@ -43,16 +42,6 @@ async function initializeController() {
     if (config.controller_id === 1) {
       logger.info(`Initializing DataLogger for station: ${config.station_name}`);
       return new DataLogger(
-        config.controller_data_url,
-        config.controller_sensor_url,
-        60000, // Reconnect interval
-        config, // Pass the configuration to the controller
-        vehicleClasses,
-        singleTires
-      );
-    } else if (config.controller_id === 2) {
-      logger.info(`Initializing InterComp for station: ${config.station_name}`);
-      return new InterComp(
         config.controller_data_url,
         config.controller_sensor_url,
         60000, // Reconnect interval

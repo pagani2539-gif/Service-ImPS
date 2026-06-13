@@ -31,7 +31,7 @@ function sendToWebSocket(data) {
 
   try {
     ws.send(JSON.stringify(data));
-    logger.debug('Data sent to WebSocket', data);
+    logger.info('[Transmit] Data sent to WebSocket', data);
   } catch (error) {
     logger.error(`Error sending data to WebSocket: ${error.message}`);
   }
