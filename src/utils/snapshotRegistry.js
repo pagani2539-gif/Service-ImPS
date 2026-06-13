@@ -1,4 +1,5 @@
 const dayjs = require("dayjs");
+const logger = require("./logger");
 
 /**
  * In-memory registry for recent snapshots.
@@ -12,6 +13,8 @@ class SnapshotRegistry {
     /** @type {Set<string>} */
     this.usedKeys = new Set();
     this.lastPrune = Date.now();
+    /** @type {Map<string, Set<Function>>} ผู้รอ snapshot ใหม่ราย lane/type */
+    this.waiters = new Map();
   }
 
   _key(lane, type) {
@@ -22,24 +25,82 @@ class SnapshotRegistry {
     return `${this._key(lane, type)}:${dayjs(stamp).valueOf()}:${imageUrl}`;
   }
 
-  register({ lane, type, stamp, imageUrl }) {
+  register({ lane, type, stamp, imageUrl, buffer }) {
     const key = this._key(lane, type);
     const entry = {
       stamp: dayjs(stamp).valueOf(),
       imageUrl,
+      buffer, // Store binary buffer in memory
     };
     const list = this.pending.get(key) || [];
+    const last = list.length ? list[list.length - 1] : null;
     list.push(entry);
-    list.sort((a, b) => a.stamp - b.stamp);
+    // รูปมักมาเรียงตามเวลาอยู่แล้ว — sort เฉพาะเมื่อมาไม่เรียง
+    if (last && entry.stamp < last.stamp) {
+      list.sort((a, b) => a.stamp - b.stamp);
+    }
     if (list.length > this.maxPerLaneType) {
       list.splice(0, list.length - this.maxPerLaneType);
     }
     this.pending.set(key, list);
 
+    this._notifyWaiters(key);
+
+    // Auto-prune stale entry buffers older than 30 seconds
+    const now = Date.now();
+    const ttlMs = 30000;
+    for (const [k, vList] of this.pending.entries()) {
+      let changed = false;
+      const filteredList = vList.map(e => {
+        if (now - e.stamp > ttlMs && e.buffer) {
+          e.buffer = null; // Clear binary data from RAM
+          changed = true;
+        }
+        return e;
+      });
+      // Clear entries older than 5 minutes
+      const cleanList = filteredList.filter(e => now - e.stamp < 300000);
+      if (cleanList.length !== vList.length || changed) {
+        this.pending.set(k, cleanList);
+      }
+    }
+
     // Auto-prune stale usedKeys every 1 minute OR when it gets too large
     if (Date.now() - this.lastPrune > 60000 || this.usedKeys.size > 500) {
       this.prune();
     }
+  }
+
+  _notifyWaiters(key) {
+    const set = this.waiters.get(key);
+    if (!set || set.size === 0) return;
+    const callbacks = [...set];
+    set.clear();
+    for (const cb of callbacks) cb();
+  }
+
+  /**
+   * รอจนมี snapshot ใหม่ของ lane/type นี้ถูก register หรือครบ timeoutMs
+   * คืน true เมื่อถูกปลุกจากการ register, false เมื่อหมดเวลา
+   */
+  waitForRegister(lane, type, timeoutMs) {
+    return new Promise((resolve) => {
+      const key = this._key(lane, type);
+      let set = this.waiters.get(key);
+      if (!set) {
+        set = new Set();
+        this.waiters.set(key, set);
+      }
+      const onRegister = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        set.delete(onRegister);
+        resolve(false);
+      }, timeoutMs);
+      set.add(onRegister);
+    });
   }
 
   /**
@@ -59,7 +120,7 @@ class SnapshotRegistry {
     }
     this.lastPrune = now;
     if (initialSize > 500) {
-        console.log(`[Registry] Pruned usedKeys. Size: ${initialSize} -> ${this.usedKeys.size}`);
+        logger.debug(`[Registry] Pruned usedKeys. Size: ${initialSize} -> ${this.usedKeys.size}`);
     }
   }
 
@@ -111,7 +172,25 @@ class SnapshotRegistry {
       lane,
       type,
       imageUrl: best.imageUrl,
+      buffer: best.buffer, // Return binary buffer
     };
+  }
+
+  /**
+   * Check if there is an unused image in the memory cache for a given lane, type, and target stamp.
+   */
+  hasUnusedImageInWindow(lane, type, targetStamp, minimumSearchMs, maximumSearchMs) {
+    const key = this._key(lane, type);
+    const list = this.pending.get(key) || [];
+    const target = dayjs(targetStamp).valueOf();
+    const min = target - minimumSearchMs;
+    const max = target + maximumSearchMs;
+
+    return list.some(entry =>
+      entry.stamp >= min &&
+      entry.stamp <= max &&
+      !this.isUsed(lane, type, entry.stamp, entry.imageUrl)
+    );
   }
 }
 

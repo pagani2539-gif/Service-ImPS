@@ -27,8 +27,9 @@ Every weighing event follows a strict path:
 - **Action:** If data is missing in the central system, check `transmissionService.js` for API response logs and the local DB for the initial record.
 
 ### 3. Visual Processing (OCR & Snapshots)
-- **OCR:** Handled by `src/utils/ocrService.js`. It processes snapshots to extract license plate numbers.
-- **Snapshot Management:** Managed by `src/utils/snapshotManager.js` and `snapshotRegistry.js`. If a pre-triggered snapshot is missing due to hardware trigger failure, the system falls back to fetching live camera snapshots on-demand.
+- **OCR:** Handled by `src/utils/ocrService.js`. It processes snapshots to extract license plate numbers. It supports receiving binary image buffers directly to bypass disk reads.
+- **Snapshot Management:** Managed by `src/utils/snapshotManager.js` and `snapshotRegistry.js`. It includes an in-memory **Memory-Cache Buffer** that stores binary image data with a **30-second TTL (Time-to-Live) auto-eviction** scheme to eliminate disk I/O latency. If a pre-triggered snapshot is missing, the system falls back to fetching live camera snapshots on-demand.
+- **Ghost Record Cleanup:** Since weighing records are saved to the database immediately to optimize performance, the system performs a background cleanup (`deleteVehicleFromDatabase`) to delete rows from `vehicles`, `axles`, `plates`, `images`, and `flags` if the background OCR later determines the vehicle is excluded.
 - **Cleanup:** `src/services/snapshotCleanupService.js` runs a midnight job to delete old snapshots from disk and clear database records to save space.
 - **Action:** To adjust storage retention, modify the `retention_days` column in the `configuration` database table, which is read dynamically during cleanup.
 
@@ -47,6 +48,15 @@ The system does not require a manual restart for configuration changes.
 - **Mechanism:** `src/services/picoService.js` calls the Pico REST endpoint (`PICO_BASE/wheel-type`) for Lane 1 vehicles.
 - **Parameters:** It requests details for Channel A with a search window of `[StartTime - 500ms, EndTime + 500ms]` based on the vehicle's detection timestamps.
 - **Recording:** Stores whether axles use single or dual tire configurations (`dual_tire` column in the `axles` table).
+
+### 7. Straddling Merge Logic
+- **Mechanism:** Combines weighing transactions when a vehicle straddles two adjacent lanes (warning flags 9/10 in DataLogger, or 27 in InterComp).
+- **Matching Criteria:** Enforces a high-precision verification process:
+  - Max time separation of 1000 ms.
+  - Lane numbers must be adjacent (difference = 1).
+  - Wheelbase values of corresponding axles must match within a 30 cm tolerance.
+  - Vehicle speeds must match within a 15 km/h tolerance.
+- **Merge Operation:** Sums the left and right sensor weights axle-by-axle and logs detailed axle-weight comparisons.
 
 ## Technical References
 - **Configuration Mapping:** See `src/utils/mappers/mapConfigurationKeys.js`.

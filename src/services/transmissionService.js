@@ -1,4 +1,5 @@
 const axios = require("axios");
+const logger = require("../utils/logger");
 async function sendToTransmission(url, data) {
   try {
     const response = await axios.post(url, data, {
@@ -7,10 +8,10 @@ async function sendToTransmission(url, data) {
         "Content-Type": "application/json", // Optional: Specify content type
       },
     });
-    console.log("POST request successful:", response.data);
+    logger.debug("sendToTransmission successful", { response: response.data });
     return response.data;
   } catch (error) {
-    console.error("Error in sendTotransmission request:", error.message);
+    logger.error(`Error in sendToTransmission request: ${error.message}`);
     // throw new Error("Failed to send data to VMS");
   }
 }

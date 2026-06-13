@@ -1,5 +1,6 @@
 const sharp = require("sharp");
 const axios = require("axios");
+const logger = require("../utils/logger");
 
 
 /**
@@ -9,6 +10,9 @@ const axios = require("axios");
  * @returns {Promise<object>} - The response data from the POST request.
  */
 async function sendToVMS(url, data) {
+  if (!url || url.trim() === "" || url === "null" || url === "undefined") {
+    return;
+  }
   try {
     const response = await axios.post(url, data, {
       timeout: 3000, // Set timeout to 3000ms
@@ -16,10 +20,10 @@ async function sendToVMS(url, data) {
         "Content-Type": "application/json", // Optional: Specify content type
       },
     });
-    console.log("POST request successful:", response.data);
+    logger.debug("sendToVMS successful", { response: response.data });
     return response.data;
   } catch (error) {
-    console.error("Error in sendToVMS request:", error.message);
+    logger.error(`Error in sendToVMS request: ${error.message}`);
     // throw new Error("Failed to send data to VMS");
   }
 }

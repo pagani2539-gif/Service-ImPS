@@ -4,13 +4,26 @@ const path = require("path");
 
 const logDirectory = path.join(process.cwd(), "logs");
 
-// Formatter for Console (Human-readable, colorful)
 const consoleFormat = winston.format.combine(
-  winston.format.colorize(),
   winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss.SSS" }),
   winston.format.printf(({ timestamp, level, message, ...meta }) => {
-    const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : "";
-    return `[${timestamp}] [${level}]: ${message}${metaStr}`;
+    // Aligns log levels (e.g. INFO, WARN, ERROR)
+    const paddedLevel = level.toUpperCase().padEnd(5);
+    const colorizer = winston.format.colorize();
+    const colorizedLevel = colorizer.colorize(level, paddedLevel);
+
+    const printMeta = { ...meta };
+    delete printMeta.metrics; // Exclude structured metrics from console string
+
+    let metaStr = "";
+    if (printMeta.stack) {
+      // Print stack traces on new lines for easy debugging
+      metaStr = `\n${printMeta.stack}`;
+    } else if (Object.keys(printMeta).length) {
+      metaStr = ` | Meta: ${JSON.stringify(printMeta)}`;
+    }
+
+    return `[${timestamp}] [${colorizedLevel}]: ${message}${metaStr}`;
   })
 );
 

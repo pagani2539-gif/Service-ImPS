@@ -24,12 +24,22 @@ let currentController = null; // Store the current controller instance
 
 async function initializeController() {
   try {
-    // Fetch all configurations
-    const configurations = await getConfiguration();
-    const vehicleClasses = await getVehicleClasses();
-    const singleTires = await getSingleTires();
+    // Fetch all configurations (อิสระต่อกัน — ยิงขนานได้)
+    const [configurations, vehicleClasses, singleTires] = await Promise.all([
+      getConfiguration(),
+      getVehicleClasses(),
+      getSingleTires(),
+    ]);
 
     const config = mapConfigurationKeys(configurations);
+
+    // Dynamically update perfMonitor log interval and format
+    const perf = require("./utils/perfMonitor");
+    perf.updateConfig({
+      intervalMs: Number(process.env.METRICS_INTERVAL_MS) || config.metrics_interval_ms || 300000,
+      format: process.env.METRICS_FORMAT || config.metrics_format || "pretty"
+    });
+
     if (config.controller_id === 1) {
       logger.info(`Initializing DataLogger for station: ${config.station_name}`);
       return new DataLogger(

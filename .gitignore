@@ -1,4 +1,5 @@
-node_modules/ 
+node_modules/
+logs/
 public/snapshots/*
 !public/.gitkeep
 !public/leds/.gitkeep

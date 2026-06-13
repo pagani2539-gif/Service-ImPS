@@ -38,6 +38,11 @@ function mapConfigurationKeys(config) {
       vehicle_length_ignored:config.vehicle_length_ignored||0,
       retention_days: config.retention_days ?? 3,
       straddling_time_diff: config.straddling_time_diff ?? 3,
+      snap_match_db_poll_ms: config.snap_match_db_poll_ms ?? 1000,
+      snap_match_max_wait_ms: config.snap_match_max_wait_ms ?? 3000,
+      trigger_history_window_ms: config.trigger_history_window_ms ?? 3000,
+      metrics_interval_ms: config.metrics_interval_ms ?? 300000,
+      metrics_format: config.metrics_format || "pretty",
     };
   }
   
