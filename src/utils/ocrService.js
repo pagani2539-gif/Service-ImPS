@@ -207,6 +207,14 @@ module.exports = {
         return null;
       }
 
+      // [Diag] ภาพ crop ไม่ตรงป้าย — log พิกัดดิบจาก OCR เทียบขนาดรูปจริง + rect ที่ตัด
+      // ถ้า rect ถูก clamp เยอะ/อยู่มุมรูป = OCR คืนพิกัดคนละ coordinate space (เช่นรูปย่อ)
+      try {
+        const meta = await sharp(sourcePath).metadata();
+        const clampedHard = rect && clamped && (rect.left !== clamped.left || rect.top !== clamped.top || rect.width !== clamped.width || rect.height !== clamped.height);
+        logger.info(`[OCR][Crop] src=${path.basename(sourcePath)} img=${meta.width}x${meta.height} pos=${JSON.stringify(position)} rect=${JSON.stringify(rect)} clamped=${JSON.stringify(clamped)}${clampedHard ? " ⚠️CLAMPED" : ""}`);
+      } catch (e) { /* diag only */ }
+
       const croppedImagePath = sourcePath.replace(/\.jpg$/i, "_cropped.jpg");
 
       await sharp(sourcePath).extract(clamped).toFile(croppedImagePath);

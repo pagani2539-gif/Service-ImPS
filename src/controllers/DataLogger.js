@@ -33,6 +33,8 @@ const { insertVehicleWithDetails, updatePlates, updateOverview } = require("../s
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
 const baseLedPath = path.join(process.cwd(), "public/leds");
 const transmissionUrl = process.env.TRANSMISSION_URL || '';
+// ซ้าย(ch1)+ขวา(ch2) ของรถคันเดียวยิง trigger แทบพร้อมกัน — ถ่าย snapshot ใบเดียวภายในช่วงนี้พอ
+const TRIGGER_DEBOUNCE_MS = Number(process.env.TRIGGER_DEBOUNCE_MS) || 250;
 const threeDimensionBase = process.env.THREE_DIMENSION_BASE || '';
 
 const { getThreeDimension, insertThreeDimensionWithWarnings } = require('../services/threeDimensionService')
@@ -126,6 +128,19 @@ class DataLogger extends WSController {
         return `A${i + 1}:${code}`;
       })
       .join(" ");
+  }
+
+  // straddle จาก "ด้านศูนย์": ทุกเพลามีฝั่งเดียวศูนย์อย่างสม่ำเสมอ (ซ้ายหมด หรือขวาหมด)
+  // ใช้เสริมกรณี WIM ไม่ติดธง 9/10 ให้ครึ่งคัน — รถปกติ 2 ฝั่งมีน้ำหนัก = false, รถเบาจะโดน floor ตัดทีหลังอยู่ดี
+  _isZeroSideStraddle(data, zeroKg = 100) {
+    const axles = data.axles || [];
+    if (axles.length === 0) return false;
+    let allL0 = true, allR0 = true;
+    for (const a of axles) {
+      if ((a.weightLeft || 0) >= zeroKg) allL0 = false;
+      if ((a.weightRight || 0) >= zeroKg) allR0 = false;
+    }
+    return (allL0 && !allR0) || (allR0 && !allL0); // ฝั่งเดียวศูนย์สม่ำเสมอ (ไม่ใช่ทั้งคู่ศูนย์ = ไม่มีข้อมูล)
   }
 
   // ฟังก์ชันสำหรับค้นหาและประมวลผล snapshots
@@ -236,9 +251,30 @@ class DataLogger extends WSController {
         logger.info(`[Filter] Dropped reverse direction (ID: ${ID}, Lane: ${mappedData.lane}, Direction: ${mappedData.direction})`);
         perf.count("dropped_reverse"); return;
       }
+      // straddle-flagged readings (warning 9/10) carry only one lane's half weight. The WIM often
+      // can't total a partial side and reports GVW = -1 even though the per-axle wheel weights are real,
+      // so a real truck partner gets dropped before it can merge. Decide keep/drop on the MEASURED wheel
+      // weight (sum of axle weights), not the GVW field: a real half-truck sums to thousands of kg
+      // (keep), a motorcycle — single wheel track = one side 0 = falsely straddle-flagged — sums to ~0
+      // (drop). Floor = gvw_ignored/2 since a half is ~half a vehicle.
+      // GVW = -1 คือ error code ของคอนโทรลเลอร์ — reading เสียทั้งใบ (น้ำหนักรายเพลาเชื่อไม่ได้)
+      // ห้ามนำไป merge → ตัดทิ้งทันที (ครึ่งคันที่ดีของมันจะกลายเป็น orphan ตามจริง = กู้ไม่ได้)
+      if (mappedData.gvw === -1) {
+        logger.info(`[Filter] Dropped controller error GVW=-1 (ID: ${ID}, Lane: ${mappedData.lane})`);
+        perf.count("dropped_error"); return;
+      }
+      // ติดธงคร่อมเลนจาก WIM (warning 9/10) หรือจาก "ด้านศูนย์" ที่เราตรวจเอง (เผื่อ WIM ไม่ติดธงให้ครึ่งคัน)
+      const isStraddleFlagged = (mappedData.warningFlags & (1 << 9)) || (mappedData.warningFlags & (1 << 10)) || this._isZeroSideStraddle(mappedData);
+      // ครึ่งคันรถบรรทุก (GVW จริงแต่ครึ่งเดียว) ยังหนักเป็นพัน กก. → ยกเว้น floor ถึง gvw_ignored/2
+      // มอเตอร์ไซค์ (ล้อแถวเดียว = ติดธงหลอก) น้ำหนักต่ำกว่า floor → ตัดทิ้ง
+      const straddleFloor = this.config.gvw_ignored / 2;
       if (ignoreGVW(mappedData.gvw, this.config.gvw_ignored)) {
-        logger.info(`[Filter] Dropped by GVW (ID: ${ID}, Lane: ${mappedData.lane}, GVW: ${mappedData.gvw}kg)`);
-        perf.count("dropped_gvw"); return;
+        if (!isStraddleFlagged || mappedData.gvw < straddleFloor) {
+          logger.info(`[Filter] Dropped by GVW (ID: ${ID}, Lane: ${mappedData.lane}, GVW: ${mappedData.gvw}kg${isStraddleFlagged ? ", straddle-flagged but below half-floor" : ""})`);
+          perf.count("dropped_gvw"); return;
+        }
+        logger.info(`[Filter] GVW below threshold but straddle-flagged — keeping for merge (ID: ${ID}, Lane: ${mappedData.lane}, GVW: ${mappedData.gvw}kg)`);
+        perf.count("straddle_gvw_kept");
       }
       mappedData = classifyVehicle(mappedData, this.config);
       mappedData = setSingleTire(mappedData, this.singleTires);
@@ -263,7 +299,8 @@ class DataLogger extends WSController {
       }
       
       // 1. ตรวจสอบเงื่อนไข Straddling (Warning 9 หรือ 10)
-      const isStraddling = mappedData.warningFlag.includes(9) || mappedData.warningFlag.includes(10);
+      // ใช้ค่าเดียวกับด่าน floor — รวมทั้งธง WIM และ zero-side ที่ตรวจเอง
+      const isStraddling = isStraddleFlagged;
       if (isStraddling) {
         const currentTime = dayjs(mappedData.stamp);
         let matchFound = false;
@@ -318,10 +355,13 @@ class DataLogger extends WSController {
               logger.info(`[Straddling] High-precision Match found! Merging vehicles. Time Diff: ${timeDiffMs}ms, Speed Diff: ${speedDiff}km/h. Left Lane ${bufferedVehicle.data.lane} [${leftWeights.join(', ')}] kg + Right Lane ${mappedData.lane} [${rightWeights.join(', ')}] kg -> Merged GVW ${merged.gvw} kg with Axles [${mergedWeights.join(', ')}] kg`);
 
               mappedData = merged;
-              // คำนวณ violation/ESAL ใหม่บนน้ำหนักรวม (ก่อน merge คำนวณบนน้ำหนักครึ่งเดียว → รถน้ำหนักเกินจะถูกบันทึกว่าผ่าน)
+              // re-classify + คำนวณ violation/ESAL ใหม่บนน้ำหนักรวม
+              // (ครึ่งคันที่ GVW=-1 จะได้ class 0; พอ merge มีน้ำหนักเต็มต้องจำแนกใหม่
+              //  + ก่อน merge violation คิดบนครึ่งเดียว → รถเกินจะถูกบันทึกว่าผ่าน)
+              mappedData = classifyVehicle(mappedData, this.config);
               mappedData = setViolation(mappedData, this.vehicleClasses, [0, 19]);
               mappedData = calculateESAL(mappedData, this.config, this.vehicleClasses);
-              logger.info(`[Straddling] Recalculated after merge (ID: ${mappedData.id}): GVW ${mappedData.gvw}kg, Violation ${mappedData.violation}, Overweight ${Number(mappedData.overweight_percentage || 0).toFixed(1)}%`);
+              logger.info(`[Straddling] Recalculated after merge (ID: ${mappedData.id}): Class ${mappedData.vehicleClassID}, GVW ${mappedData.gvw}kg, Violation ${mappedData.violation}, Overweight ${Number(mappedData.overweight_percentage || 0).toFixed(1)}%`);
               this.straddlingBuffer.delete(key);
               matchFound = true;
               break;
@@ -460,7 +500,16 @@ class DataLogger extends WSController {
         try {
           perf.count("trigger_received");
           const lane = normalizeLane(channelId);
-          this.lastTriggerTimes.set(lane, Date.now());
+          // Debounce ต่อเลน: ซ้าย(ch1)+ขวา(ch2) ของรถคันเดียวยิงไล่กันแทบพร้อมกัน → ถ่าย snapshot ใบเดียวพอ
+          // (หลังเพิ่ม trigger ฝั่งขวา ถ้าถ่าย 2 ใบ/คัน registry แน่นเท่าตัว → จับคู่รูปข้ามคัน → ภาพป้ายเพี้ยน)
+          // รถคร่อมเลนที่เหยียบฝั่งเดียว (ห่างจากคันก่อนเกิน debounce) ยัง trigger ได้ตามปกติ
+          const nowMs = Date.now();
+          const lastTrig = this.lastTriggerTimes.get(lane);
+          this.lastTriggerTimes.set(lane, nowMs);
+          if (lastTrig && (nowMs - lastTrig) < TRIGGER_DEBOUNCE_MS) {
+            perf.count("trigger_debounced");
+            return;
+          }
           const lprSnapshotConfig = this.lprConfigByLane.get(lane);
           const overviewSnapshotConfig = this.overviewConfigByLane.get(lane);
 

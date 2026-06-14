@@ -4,14 +4,14 @@
 **IMPS Service** (Intermediate Station Service) is a Node.js-based industrial IoT application designed for managing vehicle weighing stations. It acts as a middle layer between hardware weighing controllers and central monitoring systems.
 
 ### Key Features:
-- **Hardware Integration:** Supports **DataLogger** and **InterComp** weighing controllers via WebSocket. Includes reconnect logic with exponential backoff.
+- **Hardware Integration:** Connects to the **DataLogger** (Kistler WIM) weighing controller via WebSocket. Includes reconnect logic with exponential backoff.
 - **Dynamic Configuration:** Polls the local MySQL database for configuration changes every 5 seconds and auto-restarts controllers as needed.
-- **Visual Intelligence:** Integrates with OCR services for license plate recognition. Features an in-memory **Memory-Cache Buffer (30-second TTL)** in `SnapshotRegistry` to store image buffers directly and bypass disk reads. Uses a software-based on-demand fallback if hardware triggers fail, crops plate regions with `sharp`, and uploads to central servers.
+- **Visual Intelligence:** Integrates with OCR services for license plate recognition. Features an in-memory **Memory-Cache Buffer (30-second TTL)** in `SnapshotRegistry` to store image buffers directly and bypass disk reads. Crops plate regions with `sharp` and uploads to central servers. If a snapshot is not yet available, a **Smart Retry** (`waitForImages`, up to 5 attempts) waits before saving the record with missing images to avoid data loss.
 - **Asynchronous Background Flow:** Bypasses synchronous waiting for snapshots/OCR. Immediately inserts weight data to the database (~20ms) and updates LED displays (VMS) to keep the station flowing, then performs image matching, OCR processing, 3D scanning queries, and uploads in the background. WebSocket broadcasts and central HTTP transmissions are executed once the background task completes, ensuring the UI remains dynamic without manual F5 refreshes.
 - **Real-time Feedback:** Drives LED displays (VMS) and broadcasts data via WebSockets and HTTP transmission to central servers.
 - **Tire Classification:** Integrates with a Raspberry Pi Pico tire sensor to identify single or dual tire configurations per axle.
 - **3D Dimensions:** Integrates with a 3D Dimension Scanner to fetch vehicle width, length, and height, registering overheight violations.
-- **Straddling Logic:** Buffers and merges vehicle transactions when a vehicle straddles across adjacent lanes. Uses a high-precision matching algorithm comparing millisecond timestamps, adjacent lane differences, speeds, and individual axle spacing (wheelbase) to ensure accurate merging, with detailed logging of axle weight calculations.
+- **Straddling Logic:** Buffers and merges vehicle transactions when a vehicle straddles across adjacent lanes (DataLogger warning flags 9/10). Uses a high-precision matching algorithm comparing millisecond timestamps, adjacent lane differences, speeds, and individual axle spacing (wheelbase). After merging it **recalculates violation/ESAL on the combined full weight** (a half-lane reading would otherwise let an overweight vehicle pass). Every match candidate is logged with its deltas and a per-axle zero-side signature (`L0/R0`) to diagnose unmatched (orphan) halves.
 - **Automated Maintenance:** Includes a midnight cleanup service for snapshots and database logs to ensure system longevity.
 
 ### Tech Stack:
@@ -44,8 +44,7 @@
 - `src/app.js`: Application entry point, controller initializer, and config change monitoring.
 - `src/controllers/`: Contains protocol-specific logic:
     - `WSController.js`: Base class handling WebSocket connection lifecycles, retries, and backoff.
-    - `DataLogger.js`: Subclass implementing DataLogger protocols, transaction processing, and trigger fallback.
-    - `InterComp.js`: Subclass implementing InterComp protocols, transaction processing, and trigger fallback.
+    - `DataLogger.js`: Subclass implementing the DataLogger (Kistler WIM) protocol — transaction processing, straddling merge, and full-pipeline logging.
 - `src/services/`: Core business logic services:
     - `configurationService.js`: Database-driven configuration retrieval and change polling.
     - `vehiclesService.js`: Database CRUD operations for vehicles, axles, plates, images, and flags.
@@ -57,8 +56,7 @@
     - `snapshotCleanupService.js`: Nightly cleanup scheduler deleting expired snapshots and DB log rows.
 - `src/utils/mappers/`: Complex mapping logic:
     - `mapConfigurationKeys.js`: Formats database configurations into camelCase properties.
-    - `mapDataLogger.js`: Parses DataLogger payloads, performs vehicle classification, ESAL calculation, and warning/error checks.
-    - `mapInterComp.js`: Parses InterComp payloads.
+    - `mapDataLogger.js`: Parses DataLogger payloads, performs vehicle classification, ESAL calculation, straddling merge, GVW/length filters, and warning/error checks.
 - `src/utils/`: Utility and helper modules:
     - `logger.js`: Configures winston daily rotating logger.
     - `ocrService.js`: Queries OCR APIs and handles image cropping.
@@ -82,7 +80,7 @@
 3. **Classification & Mapping**: Data is parsed, class/axle allowances/ESAL calculated, and speed/lane verified.
 4. **Immediate Database Save & VMS Update**: Vehicle data is inserted into the local DB immediately (~20ms) and the LED display (VMS) is updated to notify the driver.
 5. **Background Visual Processing (Async Task)**: 
-   - `SnapshotManager` claims closest matched snapshots from memory/disk. If missing (sensor failure), it triggers live fallback snapshots immediately.
+   - `SnapshotManager` claims closest matched snapshots from memory/disk. If missing, `waitForImages` retries up to 5 times (2/4/6/8/10s); if still missing, the record is saved without images to avoid data loss.
    - Binary buffer is passed to `ocrService` to detect license plate numbers.
    - Plates and crops are uploaded to image servers, and DB records are updated.
    - If plate classification indicates an excluded vehicle (bus/passenger car), the row is deletedย้อนหลัง (Ghost Record Cleanup).
@@ -96,12 +94,14 @@
 
 ---
 
-## Zero-Delay On-Demand Trigger Fallback
+## Image Completeness via Smart Retry
 
 ### Importance:
-Ensures legal compliance and data completeness by guaranteeing that every overweight vehicle transaction recorded by the weighing scales has associated physical evidence (Overview and LPR images), even if the vehicle straddled or missed the hardware trigger sensors.
+Overview and LPR images are legal evidence for overweight vehicles. When a vehicle straddles or misses the hardware trigger, the camera may not fire and the snapshot is unavailable.
 
-### Working Principle:
-1. **Trigger Tracking:** The controller stores the timestamp of the last hardware trigger message received for each lane in a memory map (`this.lastTriggerTimes`).
-2. **Failure Check:** When a weighing transaction completes, the system computes the time difference since the last trigger. If it exceeds 15 seconds, a hardware sensor trigger failure is diagnosed.
-3. **Instant Capture:** The system skips the default 5-second polling delay for image matching, instantly queries the memory registry once (`_findSnapshotOnce`), and immediately fires an HTTP command to capture snapshots on-demand, minimizing vehicle displacement before the photo is taken.
+### Current behavior (no software on-demand capture):
+1. **Insert first:** The weighing record is saved to the DB immediately; image work runs in the background.
+2. **Smart Retry:** `waitForImages` re-runs `findAndProcessSnapshots` up to 5 times (2/4/6/8/10s) waiting for the snapshot to be registered.
+3. **Save anyway:** If retries are exhausted, the record is kept with missing images (logged as a warning) rather than lost.
+
+> Note: there is **no software on-demand / live camera capture** — the trigger must come from the hardware. A vehicle that misses the trigger (e.g. straddling past the left trigger bar) produces a record with no plate (`N/A`). This is addressed at the device level (enabling a second hardware trigger channel), not in software. `this.lastTriggerTimes` is currently recorded but not used for any fallback.

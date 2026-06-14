@@ -1,7 +1,7 @@
 # TASK — IMPS Service Performance Optimization
 
-> สรุปงาน optimize ทั้งหมด (ยังไม่ commit ณ ตอนเขียน) — ห้ามแก้ MySQL/schema/SQL, ไม่แตะ WIM calculation, ไม่เปลี่ยน sensor/protocol/API output
-> อัปเดตล่าสุด: 2026-06-13
+> สรุปงาน optimize ทั้งหมด — ห้ามแก้ MySQL/schema/SQL, ไม่แตะ WIM calculation, ไม่เปลี่ยน sensor/protocol/API output
+> อัปเดตล่าสุด: 2026-06-14
 
 ## สถานะรวม
 
@@ -10,6 +10,7 @@
 | 1 | Refactor + snapshot matching (event-driven) | ✅ เสร็จ (uncommitted) |
 | 2 | ลด work ซ้ำ + startup + logging | ✅ เสร็จ (uncommitted) |
 | 3 | Monitoring/Metrics + Stability + dedup | ✅ เสร็จ (uncommitted) |
+| 4 | Pipeline logging + Straddle fix + ลบ InterComp | ✅ commit `78bb0b8` |
 | — | งานเสนอแยก (นอก constraints) | ⬜ รออนุมัติ |
 
 ---
@@ -53,6 +54,21 @@
 - [x] `.env.example`: เพิ่ม `METRICS_INTERVAL_MS`
 
 **ไฟล์:** `WSController.js`, `perfMonitor.js` (ใหม่), `DataLogger.js`, `InterComp.js`, `db.js`, `.env.example`
+
+---
+
+## รอบ 4 — Pipeline Logging + Straddle Fix + ลบ InterComp ✅ (commit `78bb0b8`)
+
+- [x] **Pipeline logging (info, เปิดตลอด)** ครอบทั้ง DataLogger — ไล่รถ 1 คันด้วย ID เดียวได้: `[RX]` → `[Pipeline] Classified` → `[Filter] Dropped <เหตุผล>` → `[LED]` → save → `[Snapshot] Found` → `[OCR]` → `[Upload]` → `[Transmit]` → `🚗 [Vehicle Saved]`
+- [x] **console.* → logger** ใน `ocrService` / `ledDisplayService` (เดิมไม่ลงไฟล์) + เลื่อน log ส่งออกสำเร็จจาก debug → info
+- [x] เพิ่มบรรทัดสรุปต่อคัน `🚗 [Vehicle Saved]` ให้ DataLogger (เดิมมีแต่ InterComp)
+- [x] 🔴 **Straddle bugfix:** คำนวณ `setViolation`/`calculateESAL` ใหม่หลัง merge — เดิมรถคร่อมเลนที่รวมแล้วน้ำหนักเกิน ถูกบันทึกว่า "ผ่าน" เพราะ violation คิดจากน้ำหนักครึ่งเดียว
+- [x] **Straddle instrument (ชั้น 1):** log ทุก candidate (`[Straddling][Compare]` dTime/dWheelbase/dSpeed + zero-side `L0/R0`) และ orphan (`[Straddling][Orphan]`) เพื่อสืบว่าทำไมจับคู่ไม่ได้ — เงื่อนไข merge เท่าเดิม (refactor พิสูจน์แล้ว)
+- [x] **ลบ InterComp ทั้งหมด** (`InterComp.js`, `mapInterComp.js`) — หน้างานใช้แค่ DataLogger; ย้าย `ignoreGVW`/`isIgnoredLength` เข้า `mapDataLogger`, ตัด branch `controller_id===2` ใน `app.js`, ตัด export ใน `utils/index.js`, ตัด test ของ InterComp
+
+**ไฟล์:** `DataLogger.js`, `mapDataLogger.js`, `snapshotManager.js`, `ocrService.js`, `transmissionService.js`, `wsService.js`, `ledDisplayService.js`, `app.js`, `utils/index.js`, `test-mappers.js` (+ ลบ `InterComp.js`, `mapInterComp.js`)
+
+> **แก้ความเข้าใจผิดจากรอบก่อน:** "Zero-Delay On-Demand Fallback" (Task 3) **ถูกถอดออกจากโค้ดแล้ว** — ปัจจุบันใช้ `waitForImages` retry 5 ครั้งแล้วบันทึกแม้รูปไม่ครบ ไม่มีการสั่งถ่ายสด on-demand การแก้ N/A plate ทำที่ตัวเครื่อง (เปิด trigger channel 2)
 
 ---
 

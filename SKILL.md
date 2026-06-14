@@ -1,6 +1,6 @@
 ---
 name: imps-station-management
-description: Specialized workflows for managing the IMPS (Intermediate Station Service), including weighing controller integration, data transmission, and automated system maintenance. Use this when working with DataLogger/InterComp controllers, OCR services, or dynamic configuration management.
+description: Specialized workflows for managing the IMPS (Intermediate Station Service), including weighing controller integration, data transmission, and automated system maintenance. Use this when working with the DataLogger controller, OCR services, or dynamic configuration management.
 ---
 
 # IMPS Station Management Skill
@@ -10,25 +10,24 @@ This skill provides procedural guidance for managing and maintaining the Interme
 ## Core Workflows
 
 ### 1. Weighing Controller Management
-The system supports two primary hardware controllers: **DataLogger** and **InterComp**.
-- **DataLogger:** Typically uses a specialized protocol for sensor data and weighing events.
-- **InterComp:** Uses its own set of data and sensor URLs.
-- **Switching Logic:** The controller is initialized in `src/app.js` based on `controller_id` from the database.
-- **Action:** When debugging connectivity, first verify the URLs (`controller_data_url`, `controller_sensor_url`) in the database. Use `src/controllers/DataLogger.js` or `src/controllers/InterComp.js` for protocol-specific logic.
+The system uses a single hardware controller: **DataLogger** (Kistler WIM).
+- **DataLogger:** Uses a specialized protocol for sensor data and weighing events.
+- **Init Logic:** The controller is initialized in `src/app.js` when `controller_id === 1` from the database (any other id is skipped with a warning).
+- **Action:** When debugging connectivity, first verify the URLs (`controller_data_url`, `controller_sensor_url`) in the database. Protocol-specific logic lives in `src/controllers/DataLogger.js`.
 
 ### 2. Data Logging & Transmission Pipeline
 Every weighing event follows a strict path:
 1. **Trigger:** Hardware sensor detects a vehicle.
 2. **Collection:** Controller fetches weight, axles, and dimensions.
 3. **Enhancement:** `picoService` (wheel classification) and `threeDimensionService` (vehicle dimensions) fetch metadata.
-4. **Recording:** `DataLogger` or `InterComp` saves the vehicle details and axle records to the database. If a hardware trigger fails (no snapshot found in the memory registry), a software fallback automatically requests live LPR and Overview snapshots from the cameras on-demand before finalizing the database record.
+4. **Recording:** `DataLogger` saves the vehicle details and axle records to the database immediately. Image matching runs in the background; if the snapshot is not yet registered, `waitForImages` retries up to 5 times (2/4/6/8/10s) and then saves the record with missing images rather than losing it.
 5. **Transmission:** The system immediately broadcasts the saved `vehicleID` via WebSocket (`wsService`) and sends it to central servers via HTTP (`transmissionService`).
 6. **Visual Integration:** In the background, `SnapshotManager` claims matching snapshots, sends them to `ocrService` to read license plates, crops the plates using `sharp`, uploads them to central image hosting, and updates the database record. Once done, a final transmission/broadcast is sent with the updated plate details.
 - **Action:** If data is missing in the central system, check `transmissionService.js` for API response logs and the local DB for the initial record.
 
 ### 3. Visual Processing (OCR & Snapshots)
 - **OCR:** Handled by `src/utils/ocrService.js`. It processes snapshots to extract license plate numbers. It supports receiving binary image buffers directly to bypass disk reads.
-- **Snapshot Management:** Managed by `src/utils/snapshotManager.js` and `snapshotRegistry.js`. It includes an in-memory **Memory-Cache Buffer** that stores binary image data with a **30-second TTL (Time-to-Live) auto-eviction** scheme to eliminate disk I/O latency. If a pre-triggered snapshot is missing, the system falls back to fetching live camera snapshots on-demand.
+- **Snapshot Management:** Managed by `src/utils/snapshotManager.js` and `snapshotRegistry.js`. It includes an in-memory **Memory-Cache Buffer** that stores binary image data with a **30-second TTL (Time-to-Live) auto-eviction** scheme to eliminate disk I/O latency. Each found/uploaded snapshot is logged (`[Snapshot] Found ...`, `[Upload] OK ...`). There is no on-demand live capture: a missing snapshot is retried then saved without an image.
 - **Ghost Record Cleanup:** Since weighing records are saved to the database immediately to optimize performance, the system performs a background cleanup (`deleteVehicleFromDatabase`) to delete rows from `vehicles`, `axles`, `plates`, `images`, and `flags` if the background OCR later determines the vehicle is excluded.
 - **Cleanup:** `src/services/snapshotCleanupService.js` runs a midnight job to delete old snapshots from disk and clear database records to save space.
 - **Action:** To adjust storage retention, modify the `retention_days` column in the `configuration` database table, which is read dynamically during cleanup.
@@ -50,16 +49,19 @@ The system does not require a manual restart for configuration changes.
 - **Recording:** Stores whether axles use single or dual tire configurations (`dual_tire` column in the `axles` table).
 
 ### 7. Straddling Merge Logic
-- **Mechanism:** Combines weighing transactions when a vehicle straddles two adjacent lanes (warning flags 9/10 in DataLogger, or 27 in InterComp).
+- **Mechanism:** Combines weighing transactions when a vehicle straddles two adjacent lanes (DataLogger warning flags 9/10).
 - **Matching Criteria:** Enforces a high-precision verification process:
   - Max time separation of 1000 ms.
   - Lane numbers must be adjacent (difference = 1).
+  - Same axle count.
   - Wheelbase values of corresponding axles must match within a 30 cm tolerance.
   - Vehicle speeds must match within a 15 km/h tolerance.
-- **Merge Operation:** Sums the left and right sensor weights axle-by-axle and logs detailed axle-weight comparisons.
+- **Merge Operation:** Sums the left and right sensor weights axle-by-axle, then **recalculates violation/ESAL on the merged full weight** — otherwise an overweight straddler recorded from a half-lane reading would wrongly pass.
+- **Instrumentation:** Every scan candidate is logged via `[Straddling][Compare]` (dTime/dWheelbase/dSpeed + per-condition pass/fail) plus a per-axle zero-side signature (`[Straddling][Candidate] ZeroSide: L0/R0/ok`). Halves that never find a partner are logged as `[Straddling][Orphan]` and saved as a half-weight record — use these logs to diagnose why a straddle failed to merge.
 
 ## Technical References
 - **Configuration Mapping:** See `src/utils/mappers/mapConfigurationKeys.js`.
 - **Database Schema:** Reference `src/config/db.js` for connection details and existing SQL scripts in `docs/sql/`.
 - **Logs:** Monitor PM2 logs (if running in prod) or the console for "Configuration change detected" messages.
-- **Trigger Fallback Workflow:** Detailed in `src/controllers/DataLogger.js` and `src/controllers/InterComp.js`. If a hardware trigger isn't logged in `lastTriggerTimes` in the last 15 seconds, the search calls `_findSnapshotOnce` instantly to bypass the 5-second match delay and fires an on-demand fallback snapshot immediately.
+- **Image Wait Workflow:** Detailed in `src/controllers/DataLogger.js` (`waitForImages`). If snapshots are still missing after the initial find, it retries up to 5 times (2/4/6/8/10s) then saves the record with missing images. There is no software on-demand capture — a missing hardware trigger means no image (N/A plate), which is addressed at the device level (a second trigger channel).
+- **Pipeline Logging:** Every stage carries the same correlation tag so one vehicle can be traced end-to-end by grepping its ID: `[RX]` → `[Pipeline] Classified` → `[Filter] Dropped <reason>` → `[LED]` → `Data saved` → `[Snapshot] Found` → `[OCR]` → `[Upload]` → `[Transmit]` → `🚗 [Vehicle Saved]`.
