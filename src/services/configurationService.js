@@ -1,4 +1,5 @@
 const pool = require("../config/db");
+const logger = require("../utils/logger");
 // Variable to store the current configuration hash
 // Variable to store the last known `updated_at` timestamp
 let lastUpdatedAt;
@@ -10,7 +11,7 @@ let lastUpdatedAt;
     }
     lastUpdatedAt = await getLatestUpdatedAt();
   } catch (error) {
-    console.error("Error initializing lastUpdatedAt:", error);
+    logger.error(`Error initializing lastUpdatedAt: ${error.message}`);
     lastUpdatedAt = null; // ตั้งค่าเป็น null ถ้าเกิดข้อผิดพลาด
   }
 })();
@@ -61,6 +62,7 @@ async function getConfiguration() {
           c.trigger_history_window_ms,
           c.metrics_interval_ms,
           c.metrics_format,
+          c.mirror_edge_zones,
           -- Subquery for streaming_urls
           (SELECT JSON_ARRAYAGG(JSON_OBJECT('url', su.url))
           FROM streaming_urls su
@@ -87,10 +89,10 @@ async function getConfiguration() {
     // Return the first configuration
     return rows[0];
   } catch (err) {
-    console.error("Error fetching configuration:", err);
+    logger.error(`Error fetching configuration: ${err.message}`);
     throw err;
   } finally {
-    console.log(`[PERF] getConfiguration took ${Date.now() - startTime}ms`);
+    logger.info(`[PERF] getConfiguration took ${Date.now() - startTime}ms`);
   }
 }
 
@@ -117,7 +119,7 @@ async function getLatestUpdatedAt() {
 
     return new Date(rows[0].updated_at);
   } catch (err) {
-    console.error("Error fetching updated_at timestamp:", err);
+    logger.error(`Error fetching updated_at timestamp: ${err.message}`);
     throw err;
   }
 }
@@ -141,7 +143,7 @@ async function checkForConfigUpdates() {
 
     return false; // No changes detected
   } catch (err) {
-    console.error("Error checking for configuration updates:", err);
+    logger.error(`Error checking for configuration updates: ${err.message}`);
     throw err;
   }
 }

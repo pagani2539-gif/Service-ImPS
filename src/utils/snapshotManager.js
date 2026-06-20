@@ -99,7 +99,7 @@ class SnapshotManager {
    * เช็ค DB เฉพาะรอบแรก + ทุก SNAP_MATCH_DB_POLL_MS — แถวใน DB ที่โปรเซสนี้เพิ่ง insert
    * อยู่ใน memory อยู่แล้วเสมอ DB จึงมีประโยชน์เฉพาะกู้รูปที่ค้างจากก่อน restart
    */
-  async findSnapshots(mappedData, type) {
+  async findSnapshots(mappedData, type, quiet = false) {
     const isOverview = type === "overview";
     const initialDelay = isOverview
       ? Math.max(0, this.config.delay_capture_overview || 0)
@@ -130,7 +130,7 @@ class SnapshotManager {
         const found = await this._findSnapshotOnce({ ...mappedData, lane: currentLane }, type, { checkDb });
         if (found) {
           const offsetMs = dayjs(found.stamp).valueOf() - dayjs(mappedData.stamp).valueOf();
-          logger.info(`[Snapshot] Found ${type} (ID: ${mappedData.id}, lane ${currentLane}, offset ${offsetMs >= 0 ? "+" : ""}${offsetMs}ms, attempts ${attempts})`);
+          if (!quiet) logger.info(`[Snapshot] Found ${type} (ID: ${mappedData.id}, lane ${currentLane}, offset ${offsetMs >= 0 ? "+" : ""}${offsetMs}ms, attempts ${attempts})`);
           return found;
         }
       }
@@ -255,7 +255,7 @@ class SnapshotManager {
     }
   }
 
-  async uploadImage(filePath, type = null, buffer = null) {
+  async uploadImage(filePath, type = null, buffer = null, quiet = false) {
     try {
       const fileName = path.basename(filePath);
       const formData = new FormData();
@@ -278,7 +278,7 @@ class SnapshotManager {
       });
 
       if (response.data && response.data.fileUrl) {
-        logger.info(`[Upload] OK ${type || "image"} (${fileName})`);
+        if (!quiet) logger.info(`[Upload] OK ${type || "image"} (${fileName})`);
         return { success: true, data: response.data };
       }
       throw new Error("Response does not contain fileUrl");

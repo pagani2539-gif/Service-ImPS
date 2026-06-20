@@ -5,6 +5,27 @@ const fs = require("fs-extra");
 const path = require("path");
 const logger = require("./logger");
 
+// เปิด pre-process ภาพก่อนส่ง OCR ด้วย OCR_PREPROCESS=1 (ปิดเป็นค่าเริ่มต้น เพื่อ A/B เทียบได้)
+const OCR_PREPROCESS = process.env.OCR_PREPROCESS === "1";
+// OCR_DEBUG=1 เปิด log วินิจฉัย ([OCR][raw] response เต็ม + [OCR][Crop] พิกัด) — ปิดเป็นค่าเริ่มต้น
+// (ลด disk I/O/CPU บน hot path; เปิดเมื่อต้องไล่ปัญหา OCR/crop ไม่ตรงป้าย)
+const OCR_DEBUG = process.env.OCR_DEBUG === "1";
+
+/**
+ * เพิ่มความคมภาพก่อนส่งเข้า OCR — model (YOLO 2 สเตจ) resize crop ป้ายเป็น ~224-256px เสมอ
+ * "ภาพคมที่ถูกย่อ" ให้รายละเอียดตัวอักษรดีกว่า "ภาพเบลอที่ถูกย่อ" → สเตจอ่านตัวอักษรพลาดน้อยลง
+ * จงใจไม่ upscale/crop/resize — model ย่อเองอยู่แล้ว + คงพิกัด position ของ OCR ให้ map กลับรูปต้นฉบับได้ถูก
+ * (median/normalise/sharpen เปลี่ยนแค่ค่าพิกเซล ไม่แตะ geometry → crop ป้ายทีหลังยังตรง)
+ */
+async function preprocessForOcr(buffer) {
+  return sharp(buffer)
+    .median(1)              // ลด noise จุดเล็ก (กลางคืน/ISO สูง) โดยไม่เบลอขอบตัวอักษร
+    .normalise()            // ยืด contrast อัตโนมัติ แก้ภาพมืด/ย้อนแสง
+    .sharpen({ sigma: 1 })  // เพิ่มความคมขอบตัวอักษร
+    .jpeg({ quality: 92 })
+    .toBuffer();
+}
+
 /**
  * แปลง position จาก OCR เป็น { left, top, width, height }
  * รองรับ x1/y1/x2/y2, left/top/right/bottom, left/top/width/height
@@ -83,6 +104,8 @@ function normalizePosition(position) {
   };
 }
 
+// คืน { rect: {left,top,width,height}, meta: {width,height} } — ส่ง meta กลับไปใช้ซ้ำ
+// (เดิมผู้เรียกเปิด sharp().metadata() อีกรอบเพื่อ log = decode ไฟล์เดิมซ้ำ)
 async function clampRectToImage(imagePath, rect) {
   const meta = await sharp(imagePath).metadata();
   const imgW = meta.width || 0;
@@ -102,7 +125,7 @@ async function clampRectToImage(imagePath, rect) {
     return null;
   }
 
-  return { left, top, width, height };
+  return { rect: { left, top, width, height }, meta: { width: imgW, height: imgH } };
 }
 
 function resolveImagePath(preferredPath, fallbackPath) {
@@ -118,12 +141,27 @@ function resolveImagePath(preferredPath, fallbackPath) {
 module.exports = {
   normalizePosition,
 
-  async sendToOCR(snapshot, ocrEndpoint) {
+  async sendToOCR(snapshot, ocrEndpoint, quiet = false) {
     try {
       const fullPath = snapshot.imageUrl;
-      const base64Data = snapshot.buffer
-        ? `data:image/jpeg;base64,${snapshot.buffer.toString("base64")}`
-        : await this.loadImageAsBase64(fullPath);
+      let base64Data;
+      if (OCR_PREPROCESS) {
+        try {
+          const srcBuffer = snapshot.buffer || (await fs.readFile(fullPath));
+          const enhanced = await preprocessForOcr(srcBuffer);
+          base64Data = `data:image/jpeg;base64,${enhanced.toString("base64")}`;
+        } catch (e) {
+          // pre-process ล้ม = ส่งภาพต้นฉบับแทน (ไม่ทำให้คันนี้หลุด)
+          logger.warn(`[OCR] Preprocess failed, sending original: ${e.message}`);
+          base64Data = snapshot.buffer
+            ? `data:image/jpeg;base64,${snapshot.buffer.toString("base64")}`
+            : await this.loadImageAsBase64(fullPath);
+        }
+      } else {
+        base64Data = snapshot.buffer
+          ? `data:image/jpeg;base64,${snapshot.buffer.toString("base64")}`
+          : await this.loadImageAsBase64(fullPath);
+      }
 
       const response = await axios({
         method: "POST",
@@ -138,6 +176,10 @@ module.exports = {
         timeout: 3000,
       });
 
+      // [Capture] ดู response ดิบจาก model (มี score/confidence ไหม) — gate ด้วย OCR_DEBUG=1
+      // (สรุปแล้วว่า model ไม่คืน confidence; เปิดไว้เผื่อไล่ปัญหา response แปลกๆ ภายหลัง)
+      if (OCR_DEBUG) logger.info(`[OCR][raw] ${JSON.stringify(response.data)}`);
+
       const plate = response.data?.plate;
       if (!plate) {
         logger.info(`[OCR] No plate detected (${path.basename(fullPath)})`);
@@ -146,10 +188,10 @@ module.exports = {
 
       const license_plate = plate.license_plate;
       if (!license_plate) {
-        logger.info(`[OCR] Plate region found but unreadable (${path.basename(fullPath)})`);
+        if (!quiet) logger.info(`[OCR] Plate region found but unreadable (${path.basename(fullPath)})`);
         return null;
       }
-      logger.info(`[OCR] Plate: ${license_plate} (${plate.province || "N/A"}) (${path.basename(fullPath)})`);
+      if (!quiet) logger.info(`[OCR] Plate: ${license_plate} (${plate.province || "N/A"}) (${path.basename(fullPath)})`);
 
       let crop_path = null;
       if (plate.position) {
@@ -201,19 +243,21 @@ module.exports = {
         return null;
       }
 
-      const clamped = await clampRectToImage(sourcePath, rect);
-      if (!clamped) {
+      const clampResult = await clampRectToImage(sourcePath, rect);
+      if (!clampResult) {
         logger.warn(`[OCR] Crop skipped: region outside image or zero size ${JSON.stringify(position)}`);
         return null;
       }
+      const clamped = clampResult.rect;
 
       // [Diag] ภาพ crop ไม่ตรงป้าย — log พิกัดดิบจาก OCR เทียบขนาดรูปจริง + rect ที่ตัด
       // ถ้า rect ถูก clamp เยอะ/อยู่มุมรูป = OCR คืนพิกัดคนละ coordinate space (เช่นรูปย่อ)
-      try {
-        const meta = await sharp(sourcePath).metadata();
+      // gate ด้วย OCR_DEBUG=1 — ใช้ meta จาก clamp ซ้ำ (ไม่เปิด sharp รอบใหม่)
+      if (OCR_DEBUG) {
+        const meta = clampResult.meta;
         const clampedHard = rect && clamped && (rect.left !== clamped.left || rect.top !== clamped.top || rect.width !== clamped.width || rect.height !== clamped.height);
         logger.info(`[OCR][Crop] src=${path.basename(sourcePath)} img=${meta.width}x${meta.height} pos=${JSON.stringify(position)} rect=${JSON.stringify(rect)} clamped=${JSON.stringify(clamped)}${clampedHard ? " ⚠️CLAMPED" : ""}`);
-      } catch (e) { /* diag only */ }
+      }
 
       const croppedImagePath = sourcePath.replace(/\.jpg$/i, "_cropped.jpg");
 

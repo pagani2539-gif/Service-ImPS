@@ -5,6 +5,16 @@
  * @param {Object} config - Configuration object from the database.
  * @returns {Object} - Mapped configuration object with default values.
  */
+// รองรับค่าที่มาเป็น array (JSON column), string (TEXT column), หรือ null → คืน array เสมอ
+function parseEdgeZones(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; }
+    catch { return []; }
+  }
+  return [];
+}
+
 function mapConfigurationKeys(config) {
     return {
       station_id: config.station_id || 0,
@@ -38,6 +48,14 @@ function mapConfigurationKeys(config) {
       vehicle_length_ignored:config.vehicle_length_ignored||0,
       retention_days: config.retention_days ?? 3,
       straddling_time_diff: config.straddling_time_diff ?? 3,
+      // เกณฑ์จับคู่รถคร่อมเลน — ปรับใน DB ตาราง configuration ได้ (poll ทุก 5 วิ ไม่ต้อง restart)
+      straddling_axle_tol: config.straddling_axle_tol ?? 3,        // เพลาต่างกันได้กี่เพลา (เซ็นเซอร์ 2 เลนนับไม่ตรง) — เดิม fallback 1 จับคู่รถใหญ่ไม่ได้
+      straddling_speed_diff: config.straddling_speed_diff ?? 15,   // กม./ชม.
+      straddling_wheelbase_diff: config.straddling_wheelbase_diff ?? 30, // ซม.
+      straddling_zero_kg: config.straddling_zero_kg ?? 100,        // กก. เกณฑ์ตัดสิน "ด้านศูนย์" ต่อล้อ
+      // โซนขอบถนน/เกาะกลางต่อเลน สำหรับ mirror รถไหลทาง (ล้อข้างหนึ่งพ้นเซ็นเซอร์) — [{lane, side:"L"|"R"}]
+      // ว่าง [] = ปิดฟีเจอร์ (ปลอดภัย ไม่เปลี่ยนพฤติกรรมเดิม)
+      mirror_edge_zones: parseEdgeZones(config.mirror_edge_zones),
       snap_match_db_poll_ms: config.snap_match_db_poll_ms ?? 1000,
       snap_match_max_wait_ms: config.snap_match_max_wait_ms ?? 3000,
       trigger_history_window_ms: config.trigger_history_window_ms ?? 3000,
