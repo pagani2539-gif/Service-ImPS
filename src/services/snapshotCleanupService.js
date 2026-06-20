@@ -5,6 +5,7 @@ const schedule = require("node-schedule");
 const pool = require("../config/db");
 const dayjs = require("dayjs");
 const { getConfiguration } = require("./configurationService");
+const logger = require("../utils/logger");
 const snapshotsDir = path.join(__dirname, "../../public/snapshots");
 
 /**
@@ -14,10 +15,10 @@ const removeDirectoryAsync = async (dirPath) => {
   try {
     if (fsSync.existsSync(dirPath)) {
       await fs.rm(dirPath, { recursive: true, force: true });
-      console.log(`[Cleanup] Deleted directory: ${dirPath}`);
+      logger.info(`[Cleanup] Deleted directory: ${dirPath}`);
     }
   } catch (err) {
-    console.error(`[Cleanup] Error deleting ${dirPath}:`, err.message);
+    logger.error(`[Cleanup] Error deleting ${dirPath}:`, err.message);
   }
 };
 
@@ -32,7 +33,7 @@ const removeOldFolders = async () => {
       retentionDays = Number(config.retention_days);
     }
   } catch (err) {
-    console.error("[Cleanup] Failed to fetch retention_days from database, using default (3):", err.message);
+    logger.error("[Cleanup] Failed to fetch retention_days from database, using default (3):", err.message);
   }
 
   // Calculate threshold: anything BEFORE 00:00:00.000 of (today - (retentionDays-1))
@@ -40,10 +41,10 @@ const removeOldFolders = async () => {
   const thresholdDate = dayjs().startOf('day').subtract(retentionDays - 1, 'day');
   const thresholdTimestamp = thresholdDate.toDate();
 
-  console.log(`[Cleanup] Starting cleanup. Threshold: ${thresholdDate.format('YYYY-MM-DD')} (Retention: ${retentionDays} days)`);
+  logger.info(`[Cleanup] Starting cleanup. Threshold: ${thresholdDate.format('YYYY-MM-DD')} (Retention: ${retentionDays} days)`);
 
   if (!fsSync.existsSync(snapshotsDir)) {
-    console.error("[Cleanup] Snapshots directory does not exist.");
+    logger.error("[Cleanup] Snapshots directory does not exist.");
     return;
   }
 
@@ -93,27 +94,27 @@ const removeOldFolders = async () => {
         }
       }
     }
-    console.log("[Cleanup] Snapshots file cleanup completed.");
+    logger.info("[Cleanup] Snapshots file cleanup completed.");
   } catch (err) {
-    console.error("[Cleanup] Error during file cleanup loop:", err.message);
+    logger.error("[Cleanup] Error during file cleanup loop:", err.message);
   }
 
   // Database cleanup
   try {
-    console.log("[Cleanup] Deleting old snapshot records from database...");
+    logger.info("[Cleanup] Deleting old snapshot records from database...");
     const [result] = await pool.execute(
       "DELETE FROM snapshots WHERE stamp < ?", 
       [thresholdTimestamp]
     );
-    console.log(`[Cleanup] Database cleanup completed. Rows deleted: ${result.affectedRows}`);
+    logger.info(`[Cleanup] Database cleanup completed. Rows deleted: ${result.affectedRows}`);
   } catch (err) {
-    console.error("[Cleanup] Error deleting old snapshot records:", err.message);
+    logger.error("[Cleanup] Error deleting old snapshot records:", err.message);
   }
 };
 
 // Schedule the task to run every day at 04:00 AM
 schedule.scheduleJob("0 4 * * *", async () => {
-  console.log(`[Cleanup] Daily task started at ${new Date().toISOString()}`);
+  logger.info(`[Cleanup] Daily task started at ${new Date().toISOString()}`);
   await removeOldFolders();
 });
 

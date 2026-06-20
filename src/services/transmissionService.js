@@ -8,7 +8,7 @@ async function sendToTransmission(url, data) {
         "Content-Type": "application/json", // Optional: Specify content type
       },
     });
-    logger.debug("sendToTransmission successful", { response: response.data });
+    logger.info("[Transmit] sendToTransmission successful", { response: response.data });
     return response.data;
   } catch (error) {
     logger.error(`Error in sendToTransmission request: ${error.message}`);

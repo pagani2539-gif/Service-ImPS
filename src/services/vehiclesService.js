@@ -1,4 +1,5 @@
 const pool = require("../config/db"); // Import database connection pool
+const logger = require("../utils/logger");
 
 /**
  * PHASE 1 Refactoring: Optimized Database Insertion
@@ -12,8 +13,8 @@ const IS_DEV = process.env.NODE_ENV === 'development';
 // Insert a vehicle into the Vehicles table
 async function insertVehicle(connection, data) {
   const [result] = await connection.query(
-    `INSERT INTO vehicles (axles_count, gvw, vehicle_id, lane, left_weight, right_weight, length, speed, stamp, is_overweight, error_flags, warning_flags,is_error_flagged,is_warning_flagged,vehicle_class_id,esal,overweight_percentage)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO vehicles (axles_count, gvw, vehicle_id, lane, left_weight, right_weight, length, speed, stamp, is_overweight, error_flags, warning_flags,is_error_flagged,is_warning_flagged,vehicle_class_id,esal,overweight_percentage,is_estimated)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.axlesCount,
       data.gvw,
@@ -32,6 +33,7 @@ async function insertVehicle(connection, data) {
       data.vehicleClassID,
       data.esal,
       data.overweight_percentage,
+      data.isEstimated ? 1 : 0,
     ]
   );
   return result.insertId;
@@ -65,18 +67,28 @@ async function insertAxles(connection, vehicleID, axles) {
   }
 
   if (IS_DEV) {
-    console.log(`[PERF] insertAxles (Batch) took ${Date.now() - startTime}ms for ${axles.length} axles`);
+    logger.info(`[PERF] insertAxles (Batch) took ${Date.now() - startTime}ms for ${axles.length} axles`);
   }
 }
 
-// Helper: Maintains connection for transaction (Logic preserved as per Phase 1 rules)
+// Optimized: Insert axles_after_allowance using Batch Insert with Chunking
+// (เดิมยิงทีละแถว = N round-trip/รถ; แถวในตารางเท่าเดิม)
 async function insertAxlesAfterAllowances(connection, vehicleID, axlesAfterAllowance) {
-  if (!axlesAfterAllowance || !Array.isArray(axlesAfterAllowance)) return;
-  for (const axle of axlesAfterAllowance) {
+  if (!axlesAfterAllowance || !Array.isArray(axlesAfterAllowance) || axlesAfterAllowance.length === 0) return;
+
+  const values = axlesAfterAllowance.map(axle => [
+    vehicleID,
+    axle.allowance,
+    axle.axleWeight,
+    axle.number,
+  ]);
+
+  for (let i = 0; i < values.length; i += DB_BATCH_SIZE) {
+    const chunk = values.slice(i, i + DB_BATCH_SIZE);
     await connection.query(
       `INSERT INTO axles_after_allowance (vehicle_id, allowance, axle_weight, number)
-             VALUES (?, ?, ?, ?)`,
-      [vehicleID, axle.allowance, axle.axleWeight, axle.number]
+       VALUES ?`,
+      [chunk]
     );
   }
 }
@@ -116,7 +128,7 @@ async function insertFlags(connection, vehicleID, flags, flagType) {
   }
 
   if (IS_DEV) {
-    console.log(`[PERF] insertFlags (Batch: ${flagType}) took ${Date.now() - startTime}ms for ${flags.length} flags`);
+    logger.info(`[PERF] insertFlags (Batch: ${flagType}) took ${Date.now() - startTime}ms for ${flags.length} flags`);
   }
 }
 
@@ -160,7 +172,7 @@ async function insertVehicleWithDetails(vehicleData) {
       await connection.commit();
       
       if (IS_DEV) {
-        console.log(`[PERF] insertVehicleWithDetails (Total Transaction) took ${Date.now() - totalStartTime}ms`);
+        logger.info(`[PERF] insertVehicleWithDetails (Total Transaction) took ${Date.now() - totalStartTime}ms`);
       }
       
       return vehicleID;
@@ -171,11 +183,11 @@ async function insertVehicleWithDetails(vehicleData) {
 
       // Step 6: Deadlock Retry Logic (Only once)
       if (err.code === 'ER_LOCK_DEADLOCK' && !isRetry) {
-        if (IS_DEV) console.warn(`[DB] Deadlock detected for Vehicle ID: ${vehicleData.id}. Retrying once...`);
+        if (IS_DEV) logger.warn(`[DB] Deadlock detected for Vehicle ID: ${vehicleData.id}. Retrying once...`);
         return executeTransaction(true);
       }
 
-      console.error(`[DB Error] Failed to insert vehicle ${vehicleData.id}:`, err.message);
+      logger.error(`[DB Error] Failed to insert vehicle ${vehicleData.id}: ${err.message}`);
       throw err;
     }
   };

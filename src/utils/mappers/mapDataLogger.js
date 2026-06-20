@@ -1,4 +1,5 @@
 // src\utils\mappers\mapDataLogger.js
+const logger = require("../logger");
 // Utildatay to map error flags
 function mapWarningFlag(data) {
   const warningFlag = data.warningFlags;
@@ -131,89 +132,6 @@ function setSingleTire(data, singleTires) {
   return data;
 }
 
-// Function to calculate ESAL (Equivalent Single Axle Load)
-// function calculateESAL(data, config, vehiclesClass) {
-//   let esalTotal = 0;
-//   const floor = config.floor_type || "flexible";
-//   const thick = config.thick || 10;
-
-//   function safeDivide(numerator, denominator) {
-//     return denominator !== 0 ? numerator / denominator : 0; // Avoid division by zero
-//   }
-
-//   if (floor === "flexible") {
-//     data.axles.forEach((element) => {
-//       const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1; // Fallback to 1 to avoid division errors
-//       const weight = safeDivide(data.gvw * element.weight, gvwMax);
-//       const pt = 2.5;
-//       const D = thick || 10;
-//       const lx = safeDivide(weight * 2.20462262185, 1000);
-//       const l2 = element.groupID > 0 ? 2 : 1;
-
-//       const bx0 = 3.63 * Math.pow(lx + l2, 5.2);
-//       const bx1 = Math.pow(D + 1, 8.46) * Math.pow(l2, 3.52);
-//       const bx = 1 + safeDivide(bx0, bx1);
-
-//       const b18_0 = 3.63 * Math.pow(18 + 1, 5.2);
-//       const b18_1 = Math.pow(D + 1, 8.46) * Math.pow(1, 3.52);
-//       const b18 = 1 + safeDivide(b18_0, b18_1);
-
-//       const gt = safeDivide(Math.log10((4.5 - pt) / 3), 1); // Avoid invalid log operation
-//       const log_wtx_wt18 =
-//         5.9078 -
-//         4.62 * Math.log10(lx + l2) +
-//         3.28 * Math.log10(l2) +
-//         safeDivide(gt, bx) -
-//         safeDivide(gt, b18);
-
-//       const wtx_wt18 = Math.pow(10, log_wtx_wt18);
-//       const wtx = safeDivide(18, wtx_wt18);
-//       const ealf = safeDivide(18, wtx);
-
-//       if (isFinite(ealf)) {
-//         esalTotal += ealf; // Only add valid values
-//       }
-//     });
-//   }
-
-//   if (floor === "rigid") {
-//     data.axles.forEach((element) => {
-//       const gvwMax = vehiclesClass[data.vehicleClassID]?.gvw_max || 1;
-//       const weight = safeDivide(data.gvw * element.weight, gvwMax);
-//       const pt = 2.5;
-//       const D = thick || 10;
-//       const lx = safeDivide(weight * 2.20462262185, 1000);
-//       const l2 = element.groupID > 0 ? 2 : 1;
-
-//       const bx0 = 0.081 * Math.pow(lx + l2, 3.23);
-//       const bx1 = Math.pow(D + 1, 5.19) * Math.pow(l2, 3.23);
-//       const bx = 0.4 + safeDivide(bx0, bx1);
-
-//       const b18_0 = 0.081 * Math.pow(18 + 1, 3.23);
-//       const b18_1 = Math.pow(D + 1, 5.19) * Math.pow(1, 3.23);
-//       const b18 = 0.4 + safeDivide(b18_0, b18_1);
-
-//       const gt = safeDivide(Math.log10((4.2 - pt) / 2.7), 1);
-//       const log_wtx_wt18 =
-//         Math.log10(18 + 1) * 4.79 -
-//         Math.log10(lx + l2) * 4.79 +
-//         Math.log10(l2) * 4.33 +
-//         safeDivide(gt, bx) -
-//         safeDivide(gt, b18);
-
-//       const wtx_wt18 = Math.pow(10, log_wtx_wt18);
-//       const wtx = safeDivide(18, wtx_wt18);
-//       const ealf = safeDivide(18, wtx);
-
-//       if (isFinite(ealf)) {
-//         esalTotal += ealf; // Only add valid values
-//       }
-//     });
-//   }
-
-//   data.esal = esalTotal;
-//   return data;
-// }
 // คำนวณ ESAL ต่อ "การวิ่งผ่านหนึ่งครั้ง" ของรถคันหนึ่ง
 function calculateESAL(data, config = {}) {
   // ----------------- config -----------------
@@ -430,7 +348,6 @@ function isBusByWheelbase(wheelbase, minimumWheelbase) {
 
   // Check if the wheelbase meets the minimum requirement for a bus
   if (wheelbase >= minimumWheelbase) {
-    console.log("isBusByWheelbase");
     return true; // It's a bus
   }
 
@@ -454,7 +371,7 @@ function isVehicleExcludedByPlate(licensePlate) {
   // 1. Starts with Thai character (e.g., กข 1234) -> Exclude
   const firstChar = cleanPlate.charCodeAt(0);
   if (firstChar >= 0x0E01 && firstChar <= 0x0E2E) {
-    console.log(`[Filter] Excluded by Thai prefix: ${licensePlate}`);
+    logger.info(`[Filter] Excluded by Thai prefix: ${licensePlate}`);
     return true;
   }
 
@@ -464,7 +381,7 @@ function isVehicleExcludedByPlate(licensePlate) {
     if (cleanPlate.length > 1) {
       const secondChar = cleanPlate.charCodeAt(1);
       if (secondChar >= 0x0E01 && secondChar <= 0x0E2E) {
-        console.log(`[Filter] Excluded by modern Thai prefix (digit+char): ${licensePlate}`);
+        logger.info(`[Filter] Excluded by modern Thai prefix (digit+char): ${licensePlate}`);
         return true;
       }
     }
@@ -472,7 +389,7 @@ function isVehicleExcludedByPlate(licensePlate) {
     // DLT standard prefixes for trucks/buses
     const prefix = parseInt(cleanPlate.substring(0, 2), 10);
     if (prefix >= 10 && prefix <= 49) {
-      console.log(`[Filter] Excluded by Bus/Passenger prefix: ${prefix} (${licensePlate})`);
+      logger.info(`[Filter] Excluded by Bus/Passenger prefix: ${prefix} (${licensePlate})`);
       return true;
     }
     
@@ -490,18 +407,16 @@ function isVehicleExcludedByPlate(licensePlate) {
 
 /**
  * รวมน้ำหนักรถ 2 คันที่วิ่งคร่อมเลน
- * @param {Object} vehicleLeft - ข้อมูลรถที่ตรวจจับได้ฝั่งซ้าย (มีน้ำหนักฝั่งซ้ายที่ถูกต้อง)
- * @param {Object} vehicleRight - ข้อมูลรถที่ตรวจจับได้ฝั่งขวา (มีน้ำหนักฝั่งขวาที่ถูกต้อง)
- * @returns {Object|null} - ข้อมูลรถที่รวมน้ำหนักแล้ว หรือ null ถ้าจำนวนเพลาไม่ตรงกัน
+ * - เพลาเท่ากัน: รวม index ต่อ index (เลนซ้ายให้น้ำหนักล้อฝั่งซ้ายของรถ, เลนขวาให้ฝั่งขวา)
+ * - เพลาไม่เท่ากัน: align ด้วย "ตำแหน่งเพลาสะสม" (wheelbase = ระยะห่างจากเพลาก่อนหน้า) แล้วรวม
+ *   เพลาที่จับคู่ได้; เพลาที่อยู่ในเลนเดียว (อีกเลนอ่านไม่เจอ) นับด้านเดียวเท่าที่มี + flag ไว้ให้รีวิว
+ * @param {Object} vehicleLeft - ข้อมูลรถที่ตรวจจับได้ (ฝั่งหนึ่ง)
+ * @param {Object} vehicleRight - ข้อมูลรถที่ตรวจจับได้ (อีกฝั่ง)
+ * @param {number} axleTolCm - ระยะคลาดเคลื่อนตำแหน่งเพลาที่ยอมให้จับคู่กันได้ (ซม.)
+ * @returns {Object|null} - ข้อมูลรถที่รวมน้ำหนักแล้ว หรือ null ถ้า align ไม่ลงตัว (น่าจะคนละคัน)
  */
-function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
-  // ตรวจสอบเบื้องต้นว่าจำนวนเพลาเท่ากันหรือไม่
-  if (vehicleLeft.axles.length !== vehicleRight.axles.length) {
-    console.error("Cannot merge: Axle counts do not match.");
-    return null;
-  }
-
-  // กำหนดว่าฝั่งไหนอยู่ซ้าย ฝั่งไหนอยู่ขวา ตามหมายเลขเลน
+function mergeStraddlingVehicles(vehicleLeft, vehicleRight, axleTolCm = 30) {
+  // กำหนดว่าฝั่งไหนอยู่ซ้าย ฝั่งไหนอยู่ขวา ตามหมายเลขเลน (เลนน้อย = ซ้าย)
   let leftPart = vehicleLeft;
   let rightPart = vehicleRight;
   if (vehicleLeft.lane > vehicleRight.lane) {
@@ -509,54 +424,180 @@ function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
     rightPart = vehicleLeft;
   }
 
-  // ใช้โครงสร้างของ leftPart เป็นฐาน (หรือเลือกคันที่สมบูรณ์กว่า)
-  let mergedData = { ...leftPart };
-  
-  let totalGvw = 0;
-  let totalLeftWeight = 0;
-  let totalRightWeight = 0;
-
-  // วนลูปเพื่อรวมน้ำหนักแต่ละเพลา
-  mergedData.axles = leftPart.axles.map((axleL, index) => {
-    const axleR = rightPart.axles[index];
-    
-    // เพื่อรองรับการวิ่งคร่อมเลนในทุกรูปแบบ (ไม่ว่าจะเบียดซ้าย/ขวา หรือทับเซ็นเซอร์ฝั่งใดของเลน)
-    // - ล้อฝั่งซ้ายของรถจะกดทับเซ็นเซอร์ในเลนซ้าย (leftPart) ทั้งหมด (ซ้าย + ขวา)
-    // - ล้อฝั่งขวาของรถจะกดทับเซ็นเซอร์ในเลนขวา (rightPart) ทั้งหมด (ซ้าย + ขวา)
+  // รวมเพลาที่จับคู่กันได้: เลนซ้ายให้ฝั่งซ้ายของรถ (sensor ซ้าย+ขวาในเลนซ้าย), เลนขวาให้ฝั่งขวา
+  const sumAxle = (axleL, axleR) => {
     const newWeightLeft = axleL.weightLeft + axleL.weightRight;
     const newWeightRight = axleR.weightLeft + axleR.weightRight;
-    const newAxleWeight = newWeightLeft + newWeightRight;
-
-    totalLeftWeight += newWeightLeft;
-    totalRightWeight += newWeightRight;
-    totalGvw += newAxleWeight;
-
     return {
       ...axleL,
       weightLeft: newWeightLeft,
       weightRight: newWeightRight,
-      weight: newAxleWeight,
-      // คำนวณความเร็วเฉลี่ยจากทั้งสองฝั่ง (ถ้าจำเป็น)
+      weight: newWeightLeft + newWeightRight,
       speedLeft: axleL.speedLeft,
       speedRight: axleR.speedRight,
     };
-  });
+  };
 
-  // อัปเดตค่าน้ำหนักรวมของรถ
+  let mergedAxles;
+  let axleMismatch = false;
+
+  if (leftPart.axles.length === rightPart.axles.length) {
+    // ----- เพลาเท่ากัน: รวม index ต่อ index (พฤติกรรมเดิม) -----
+    mergedAxles = leftPart.axles.map((axleL, i) => sumAxle(axleL, rightPart.axles[i]));
+  } else {
+    // ----- เพลาไม่เท่ากัน: align ด้วยตำแหน่งเพลาสะสม + เลื่อนหา offset ที่ดีที่สุด -----
+    // ตำแหน่งสะสมเทียบจากเพลาแรก (เพลาแรก = 0; เพลาถัดไป = บวก wheelbase = ระยะจากเพลาก่อนหน้า)
+    // ปัญหาเดิม: ยึดเพลาแรกของทั้งสองลิสต์ = 0 → ถ้าเลนที่จับได้น้อย "พลาดเพลาหน้า"
+    // ตำแหน่งจะเลื่อนทั้งแถว จับคู่เพลาผิด แล้วตกเป็น orphan ทั้งที่เป็นรถคันเดียว
+    // แก้: เลื่อนลิสต์สั้นไปทุกตำแหน่งเทียบลิสต์ยาว เลือก offset ที่จับคู่ได้ครบ+ระยะรวมน้อยสุด
+    const cumPos = (axles) => {
+      let acc = 0;
+      return axles.map((a, i) => (i === 0 ? 0 : (acc += a.wheelbase || 0)));
+    };
+
+    // เพลาที่อยู่ในเลนเดียว (อีกเลนอ่านไม่เจอด้านเดียว) → นับน้ำหนักด้านเดียวเท่าที่มี
+    const oneSided = (axle, fromLeftLane) => {
+      const w = (axle.weightLeft || 0) + (axle.weightRight || 0);
+      return {
+        ...axle,
+        weightLeft: fromLeftLane ? w : 0,
+        weightRight: fromLeftLane ? 0 : w,
+        weight: w,
+        oneSided: true, // flag เพลานี้ว่ามาจากเลนเดียว (น้ำหนักอาจไม่ครบ)
+      };
+    };
+
+    // ลิสต์ยาว = เลนที่จับเพลาได้ครบกว่า (เป็นโครงหลัก), ลิสต์สั้น = เลื่อนไปจับ
+    const leftIsLong = leftPart.axles.length >= rightPart.axles.length;
+    const longPart = leftIsLong ? leftPart : rightPart;
+    const shortPart = leftIsLong ? rightPart : leftPart;
+    const longPos = cumPos(longPart.axles);
+    const shortPos = cumPos(shortPart.axles);
+
+    // ลองเลื่อนเพลาแรกของลิสต์สั้นไปตรงกับเพลาที่ k ของลิสต์ยาว (delta = longPos[k] - shortPos[0])
+    // เลือก offset ที่จับคู่ครบทุกเพลาของลิสต์สั้น แล้วระยะรวมน้อยสุด
+    let best = { matched: -1, totalDist: Infinity, pairs: null };
+    for (let k = 0; k < longPos.length; k++) {
+      const delta = longPos[k] - shortPos[0];
+      const pairs = new Array(longPos.length).fill(-1); // index ลิสต์ยาว → index ลิสต์สั้นที่จับคู่
+      let s = 0, matched = 0, totalDist = 0;
+      for (let l = 0; l < longPos.length && s < shortPos.length; l++) {
+        const d = Math.abs((shortPos[s] + delta) - longPos[l]);
+        if (d <= axleTolCm) { pairs[l] = s; matched++; totalDist += d; s++; }
+      }
+      // ใช้ offset นี้ได้ก็ต่อเมื่อจับคู่เพลาของลิสต์สั้นได้ "ครบทุกเพลา"
+      if (s === shortPos.length &&
+          (matched > best.matched || (matched === best.matched && totalDist < best.totalDist))) {
+        best = { matched, totalDist, pairs };
+      }
+    }
+
+    // จับคู่ครบทุกเพลาของลิสต์สั้นไม่ได้เลย = ลำดับเพลาเพี้ยน ไม่น่าใช่คันเดียวกัน → ไม่ merge ปล่อยเป็น orphan
+    if (!best.pairs) {
+      return null;
+    }
+
+    // สร้างเพลารวมตามลำดับลิสต์ยาว: เพลาที่จับคู่ได้ = รวม 2 ฝั่ง, ที่เหลือ = ด้านเดียว (เลนยาวเห็นข้างเดียว)
+    mergedAxles = longPart.axles.map((axleLong, l) => {
+      const s = best.pairs[l];
+      if (s === -1) return oneSided(axleLong, leftIsLong);
+      const axleShort = shortPart.axles[s];
+      // เรียง (เลนซ้าย, เลนขวา) ให้ถูกตาม sumAxle: เลนซ้าย→ฝั่งซ้ายรถ, เลนขวา→ฝั่งขวารถ
+      return leftIsLong ? sumAxle(axleLong, axleShort) : sumAxle(axleShort, axleLong);
+    });
+    axleMismatch = true;
+  }
+
+  // ----- รวมผลลัพธ์ -----
+  let mergedData = { ...leftPart };
+  let totalGvw = 0, totalLeftWeight = 0, totalRightWeight = 0;
+  for (const a of mergedAxles) {
+    totalLeftWeight += a.weightLeft;
+    totalRightWeight += a.weightRight;
+    totalGvw += a.weight;
+  }
+  mergedData.axles = mergedAxles;
   mergedData.gvw = totalGvw;
   mergedData.leftWeight = totalLeftWeight;
   mergedData.rightWeight = totalRightWeight;
-  
+
   // เก็บป้ายทะเบียนและรูปภาพจากฝั่งที่หาเจอ (ถ้ามี)
   mergedData.licensePlate = vehicleLeft.licensePlate || vehicleRight.licensePlate || "";
   mergedData.platePath = vehicleLeft.platePath || vehicleRight.platePath || "";
   mergedData.overviewPath = vehicleLeft.overviewPath || vehicleRight.overviewPath || "";
   mergedData.cropPath = vehicleLeft.cropPath || vehicleRight.cropPath || "";
   mergedData.province = vehicleLeft.province || vehicleRight.province || "";
-  
+
   mergedData.isStraddlingMerged = true; // flag ไว้ว่าเกิดจากการรวมข้อมูล
+  mergedData.straddleAxleMismatch = axleMismatch; // true = รวมแบบเพลาไม่เท่ากัน (มีเพลานับด้านเดียว — ควรรีวิว)
+  mergedData.originalLanes = [vehicleLeft.lane, vehicleRight.lane];
 
   return mergedData;
+}
+
+/**
+ * Mirror "รายเพลา" สำหรับรถไหลทาง/เฉียง ที่ล้อบางเพลาพ้นเซ็นเซอร์ออกขอบถนน/เกาะกลาง
+ * รถจริงมักเฉียง → เพลาแค่บางส่วน (หัว/กลาง/ท้าย) ฝั่งเดียวศูนย์ ที่เหลืออยู่ในเลนเต็ม
+ * จึง mirror "เฉพาะเพลาที่ฝั่งหายหันออกขอบ" (leftEdge/rightEdge) เก็บเพลาที่ครบไว้ตามจริง
+ * - leftEdge:  เพลาที่ซ้าย < zeroKg และขวา ≥ zeroKg → เอาขวามาใส่ซ้าย (weight = 2× ค่าที่วัด)
+ * - rightEdge: เพลาที่ขวา < zeroKg และซ้าย ≥ zeroKg → เอาซ้ายมาใส่ขวา
+ * - เพลาครบ 2 ฝั่ง / ศูนย์ทั้งคู่ (เพลายก/ไม่มีข้อมูล) → คงเดิม
+ * คืน { data, mirrored: [เลขเพลาที่ mirror] } — mirrored.length === 0 = ไม่มีเพลาเข้าเงื่อนไข (ไม่แตะ data)
+ */
+function mirrorEdgeAxles(data, leftEdge, rightEdge, zeroKg = 100) {
+  const mirrored = [];
+  let gvw = 0, leftWeight = 0, rightWeight = 0;
+  data.axles = (data.axles || []).map((a, i) => {
+    const l = a.weightLeft || 0;
+    const r = a.weightRight || 0;
+    let axle = a;
+    if (leftEdge && l < zeroKg && r >= zeroKg) {
+      axle = { ...a, weightLeft: r, weight: r * 2 };
+      mirrored.push(a.number ?? i + 1);
+    } else if (rightEdge && r < zeroKg && l >= zeroKg) {
+      axle = { ...a, weightRight: l, weight: l * 2 };
+      mirrored.push(a.number ?? i + 1);
+    }
+    gvw += (axle.weightLeft || 0) + (axle.weightRight || 0);
+    leftWeight += axle.weightLeft || 0;
+    rightWeight += axle.weightRight || 0;
+    return axle;
+  });
+  if (mirrored.length) {
+    data.gvw = gvw;
+    data.leftWeight = leftWeight;
+    data.rightWeight = rightWeight;
+  }
+  return { data, mirrored };
+}
+
+/**
+ * รวม "เศษ" ของรถคันเดียวที่คอนโทรลเลอร์เลนเดียวกันตัดเป็น 2 record (เช่น รถยาวที่มีช่องว่าง bogie)
+ * front = ท่อนที่มาก่อน (เพลาหน้า), rear = ท่อนที่มาทีหลัง (เพลาท้าย); ต่อ axles หน้า→หลัง
+ * gapCm = ระยะประมาณระหว่างท่อน (จาก timeGap × speed) ใส่เป็น wheelbase ของเพลาแรกท่อนหลัง
+ * คืน record ใหม่ axles ต่อกัน + รวม gvw/น้ำหนัก + ตั้ง fragmentsCombined=true (ใช้ข้าม strict wheelbase ตอน match อีกเลน)
+ */
+function combineSameLaneFragments(front, rear, gapCm = 0) {
+  const axles = [
+    ...front.axles.map((a) => ({ ...a })),
+    ...rear.axles.map((a, i) => ({ ...a, wheelbase: i === 0 ? gapCm : a.wheelbase })),
+  ].map((a, i) => ({ ...a, number: i + 1 }));
+  let gvw = 0, leftWeight = 0, rightWeight = 0;
+  for (const a of axles) {
+    gvw += (a.weightLeft || 0) + (a.weightRight || 0);
+    leftWeight += a.weightLeft || 0;
+    rightWeight += a.weightRight || 0;
+  }
+  return {
+    ...front,
+    axles,
+    axlesCount: axles.length,
+    gvw,
+    leftWeight,
+    rightWeight,
+    warningFlags: (front.warningFlags || 0) | (rear.warningFlags || 0),
+    fragmentsCombined: true,
+  };
 }
 
 /**
@@ -567,6 +608,38 @@ function mergeStraddlingVehicles(vehicleLeft, vehicleRight) {
 function isReverseDirection(direction) {
   // ตรวจสอบว่าถ้า direction เท่ากับ 1 ให้ถือว่าเป็นทิศทางย้อนกลับ (True)
   return direction === 1;
+}
+
+/**
+ * Check if the GVW should be ignored (too light / no data).
+ * @param {Number} gvw - Gross vehicle weight.
+ * @param {Number} gvwIgnored - Minimum GVW threshold below which the record is dropped.
+ * @returns {Boolean} - true if the record should be ignored.
+ */
+function ignoreGVW(gvw, gvwIgnored) {
+  if (!gvw || typeof gvw === "undefined") return true; // Ignore if no GVW data
+  if (gvw < gvwIgnored) {
+    return true;
+  }
+  return false; // GVW is valid
+}
+
+/**
+ * Check if the vehicle's wheelbase is below the minimum length (ignored).
+ * @param {Number} wheelbase - The wheelbase of the vehicle.
+ * @param {Number} minLength - The minimum wheelbase length to not be ignored.
+ * @returns {Boolean} - true if the wheelbase is less than the minimum length.
+ */
+function isIgnoredLength(wheelbase, minLength) {
+  if (
+    !wheelbase ||
+    typeof wheelbase !== "number" ||
+    !minLength ||
+    typeof minLength !== "number"
+  ) {
+    return false; // Invalid input
+  }
+  return wheelbase < minLength;
 }
 
 module.exports = {
@@ -581,5 +654,9 @@ module.exports = {
   formatLicensePlate,
   isBusByWheelbase,
   mergeStraddlingVehicles,
-  isReverseDirection
+  mirrorEdgeAxles,
+  combineSameLaneFragments,
+  isReverseDirection,
+  ignoreGVW,
+  isIgnoredLength
 };

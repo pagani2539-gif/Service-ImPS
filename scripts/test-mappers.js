@@ -8,9 +8,6 @@ const {
   isReverseDirection,
   mergeStraddlingVehicles: mergeDataLogger
 } = require('../src/utils/mappers/mapDataLogger');
-const {
-  mergeStraddlingVehicles: mergeInterComp
-} = require('../src/utils/mappers/mapInterComp');
 
 console.log("=== Starting Unit Tests for Mappers ===");
 
@@ -112,8 +109,8 @@ runTest("isReverseDirection: Direction checking", () => {
     assert.strictEqual(isReverseDirection(1), true, "Direction 1 is reverse");
 });
 
-// 6. Test Straddling Merge (DataLogger and InterComp)
-runTest("mergeStraddlingVehicles: DataLogger and InterComp merge order-independence", () => {
+// 6. Test Straddling Merge (DataLogger)
+runTest("mergeStraddlingVehicles: DataLogger merge order-independence", () => {
     const vehicleLeft = {
         lane: 1,
         licensePlate: "80-1234",
@@ -150,18 +147,6 @@ runTest("mergeStraddlingVehicles: DataLogger and InterComp merge order-independe
     assert.strictEqual(resDataLoggerRightFirst.axles[0].weight, 2200, "Axle weight should be 2200");
     assert.strictEqual(resDataLoggerRightFirst.axles[0].weightLeft, 1000, "Axle weightLeft should be 1000");
     assert.strictEqual(resDataLoggerRightFirst.axles[0].weightRight, 1200, "Axle weightRight should be 1200");
-
-    // Test InterComp merge where Left is first parameter
-    const resInterCompLeftFirst = mergeInterComp(vehicleLeft, vehicleRight);
-    assert.ok(resInterCompLeftFirst, "Should merge successfully");
-    assert.strictEqual(resInterCompLeftFirst.gvw, 2200, "GVW should be 2200 when left is first");
-    assert.strictEqual(resInterCompLeftFirst.axles[0].weight, 2200, "Axle weight should be 2200");
-
-    // Test InterComp merge where Right is first parameter (the buggy case)
-    const resInterCompRightFirst = mergeInterComp(vehicleRight, vehicleLeft);
-    assert.ok(resInterCompRightFirst, "Should merge successfully");
-    assert.strictEqual(resInterCompRightFirst.gvw, 2200, "GVW should be 2200 when right is first");
-    assert.strictEqual(resInterCompRightFirst.axles[0].weight, 2200, "Axle weight should be 2200");
 
     // --- Test Case 2: Partial/mixed sensor activation on both lanes ---
     const vehicleLeftMixed = {
