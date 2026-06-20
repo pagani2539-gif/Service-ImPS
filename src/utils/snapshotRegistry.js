@@ -13,6 +13,9 @@ class SnapshotRegistry {
     /** @type {Set<string>} */
     this.usedKeys = new Set();
     this.lastPrune = Date.now();
+    // throttle การกวาด buffer (clear binary 30s / ลบ entry 5min) — เดิมรันทุก register (ทุกรูป)
+    // ทำให้ register หนักเกินจำเป็นช่วงรถถี่ กวาดทุก ~5s ก็ทัน TTL อยู่แล้ว
+    this.lastBufferPrune = Date.now();
     /** @type {Map<string, Set<Function>>} ผู้รอ snapshot ใหม่ราย lane/type */
     this.waiters = new Map();
   }
@@ -46,23 +49,28 @@ class SnapshotRegistry {
 
     this._notifyWaiters(key);
 
-    // Auto-prune stale entry buffers older than 30 seconds
+    // Auto-prune stale entry buffers (clear binary >30s, ลบ entry >5min)
+    // throttle: เดิมกวาดทั้ง map ทุก register (ทุกรูป) — หนักเกินจำเป็น. กวาดทุก ~5s ก็ทัน TTL
+    // (claimClosest กรอง time-window เอง + maxPerLaneType cap ทุก register → entry ค้างอีก 5s ไม่กระทบ match)
     const now = Date.now();
-    const ttlMs = 30000;
-    for (const [k, vList] of this.pending.entries()) {
-      let changed = false;
-      const filteredList = vList.map(e => {
-        if (now - e.stamp > ttlMs && e.buffer) {
-          e.buffer = null; // Clear binary data from RAM
-          changed = true;
+    if (now - this.lastBufferPrune > 5000) {
+      const ttlMs = 30000;
+      for (const [k, vList] of this.pending.entries()) {
+        let changed = false;
+        const filteredList = vList.map(e => {
+          if (now - e.stamp > ttlMs && e.buffer) {
+            e.buffer = null; // Clear binary data from RAM
+            changed = true;
+          }
+          return e;
+        });
+        // Clear entries older than 5 minutes
+        const cleanList = filteredList.filter(e => now - e.stamp < 300000);
+        if (cleanList.length !== vList.length || changed) {
+          this.pending.set(k, cleanList);
         }
-        return e;
-      });
-      // Clear entries older than 5 minutes
-      const cleanList = filteredList.filter(e => now - e.stamp < 300000);
-      if (cleanList.length !== vList.length || changed) {
-        this.pending.set(k, cleanList);
       }
+      this.lastBufferPrune = now;
     }
 
     // Auto-prune stale usedKeys every 1 minute OR when it gets too large

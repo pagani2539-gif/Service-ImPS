@@ -40,33 +40,27 @@ sequenceDiagram
         IMPS->>DB: บันทึกข้อมูลรถและน้ำหนักเพลา (vehicles, axles, flags)
     end
 
-    rect rgb(240, 255, 240)
-        note over IMPS, Pico: ตรวจจับข้อมูลยางรถยนต์ (เฉพาะ Lane 1)
-        IMPS->>Pico: ดึงข้อมูลประเภทล้อ/ยางล้อเดี่ยว-ล้อคู่ (Wheel Type)
-        Pico-->>IMPS: ส่งคืนสถานะล้อเดี่ยว/ล้อคู่
-        IMPS->>DB: บันทึกข้อมูลล้อลงในตาราง axles
+    rect rgb(245, 245, 245)
+        note over IMPS, OCR: Background Processing (Async) — ทำหลัง insert แล้ว ไม่บล็อกการรับข้อมูลน้ำหนัก
+        IMPS->>IMPS: ค้นหารูปถ่ายที่ตรงกับ Lane และเวลาด่านชั่ง (Smart Retry สูงสุด 5 ครั้ง: 2/4/6/8/10s)
+        IMPS->>OCR: ส่งรูป LPR ไปอ่านป้ายทะเบียนและจังหวัด
+        OCR-->>IMPS: ส่งคืนป้ายทะเบียน, จังหวัด และตำแหน่งกรอบป้าย (Position)
+        IMPS->>IMPS: ตัดเฉพาะป้ายทะเบียน (Crop Image) ด้วย Sharp
+        IMPS->>Central: อัปโหลดภาพถ่ายทั้งหมด (LPR, Crop, Overview) ไปยัง Image Server
+        IMPS->>DB: อัปเดตข้อมูลป้ายทะเบียนและลิงก์รูปภาพในฐานข้อมูล (updatePlates, updateOverview)
+        IMPS->>LED: ส่งภาพ/น้ำหนัก/คำเตือนไปแสดงผลที่จอ VMS (หลังได้รูป/ป้ายครบ)
     end
 
     rect rgb(255, 240, 245)
-        note over IMPS, TD: เชื่อมโยงขนาดตัวรถแบบ 3D
+        note over IMPS, TD: เชื่อมโยงขนาดตัวรถแบบ 3D (เฉพาะเมื่อตั้ง THREE_DIMENSION_BASE)
         IMPS->>TD: ดึงข้อมูลขนาด (กว้าง, ยาว, สูง) ด้วยเวลาและป้ายทะเบียน
         TD-->>IMPS: ส่งคืนมิติตัวรถและสถานะสูงเกิน (Overheight)
         IMPS->>DB: บันทึกข้อมูล 3D และ Warning Map (three_dimension, three_dimension_warning_map)
     end
 
-    IMPS->>LED: ส่งข้อมูลน้ำหนักและคำเตือนไปแสดงผลที่หน้าจอ VMS
-    IMPS->>Central: ส่งสัญญาณ WebSocket แจ้งเตือน และส่งข้อมูลผ่าน HTTP Transmission API
+    IMPS->>Central: แจ้ง WebSocket + ส่งข้อมูลผ่าน HTTP Transmission API (ท้ายสุด หลังงาน 3D)
 
-    rect rgb(245, 245, 245)
-        note over IMPS, OCR: ขั้นตอน Background Processing (OCR & Upload)
-        IMPS->>IMPS: ค้นหารูปถ่ายที่ตรงกับ Lane และเวลาด่านชั่ง (Smart Retry 3 ครั้ง)
-        IMPS->>OCR: ส่งรูปภาพไปที่ OCR Service เพื่อดึงป้ายทะเบียนและจังหวัด
-        OCR-->>IMPS: ส่งคืนป้ายทะเบียน, จังหวัด และตำแหน่งกรอบป้าย (Position)
-        IMPS->>IMPS: ตัดเฉพาะป้ายทะเบียน (Crop Image) ด้วย Sharp
-        IMPS->>Central: อัปโหลดภาพถ่ายทั้งหมด (LPR, Crop, Overview) ไปยัง Image Server
-        IMPS->>DB: อัปเดตข้อมูลป้ายทะเบียนและลิงก์รูปภาพในฐานข้อมูล (updatePlates, updateOverview)
-        IMPS->>Central: ส่งข้อมูลอัปเดต (ป้ายทะเบียน + ลิงก์รูปภาพ) ไปยัง Server ส่วนกลางอีกครั้ง
-    end
+    note over IMPS, Pico: หมายเหตุ — Pico (ยางล้อเดี่ยว/ล้อคู่) ปัจจุบัน "ไม่ได้" เชื่อมเข้า pipeline (คงไฟล์ไว้ ยังไม่ถูกเรียก)
 ```
 
 ---
@@ -83,8 +77,8 @@ sequenceDiagram
    - ตรวจจับป้ายทะเบียนผ่าน OCR API, ตัดรูปป้ายทะเบียน (Crop Image) ด้วย `sharp` และอัปโหลดไฟล์ภาพไปยังเซิร์ฟเวอร์เก็บรูปภาพ
    - หากกล้องอ่านป้ายได้ว่าเป็นรถที่ต้องยกเว้น (เช่น รถเก๋งส่วนบุคคล หรือ รถบัสขนาดเล็ก) ระบบจะทำการลบข้อมูลรถคันนั้นออกจากระบบโดยอัตโนมัติ
 
-3. **Wheel / Tire Type Identification (Pico Integration)**
-   - เชื่อมต่อกับ Raspberry Pi Pico สำหรับระบุประเภทล้อหน้า/หลังว่าเป็นล้อเดี่ยวหรือล้อคู่ (Single / Dual Tire) และเก็บลงฐานข้อมูลเพื่อวิเคราะห์ความเสียหายผิวทาง
+3. **Wheel / Tire Type Identification (Pico Integration)** — ⚠️ *ปัจจุบันยังไม่ได้เชื่อมเข้า pipeline*
+   - มีโค้ดบริการ (`src/services/picoService.js`) สำหรับดึงสถานะล้อเดี่ยว/ล้อคู่ (Single/Dual Tire) จาก Raspberry Pi Pico แต่ **ฟังก์ชันนี้ยังไม่ถูกเรียกใช้จาก pipeline จริง** (คงไฟล์ไว้เผื่อ re-wire ภายหลัง) — สถานะล้อเดี่ยวที่บันทึกลง `axles` ปัจจุบันมาจากตาราง `single_tires` (`setSingleTire`) ไม่ใช่จาก Pico
 
 4. **3D Dimension Scanner Integration**
    - เชื่อมโยงข้อมูลความกว้าง ความยาว และความสูงของยานพาหนะจากเครื่องสแกน 3D
@@ -92,11 +86,16 @@ sequenceDiagram
 
 5. **Straddling Merge Logic (ระบบควบรวมรถวิ่งคร่อมเลนความแม่นยำสูง)**
    - มีระบบพักข้อมูลใน Buffer และตรวจสอบรถวิ่งคร่อมเลน (Straddling) โดยจับคู่รถด้วยกลไกความแม่นยำสูง (High-Precision):
-     * เปรียบเทียบผลต่างของเวลาในระดับมิลลิวินาที (ไม่เกิน 1,000 ms)
+     * เปรียบเทียบเวลามาถึงของ 2 ครึ่ง — ไม่เกิน `straddling_time_diff` (**default 3 วินาที**)
      * บังคับต้องเป็นเลนที่อยู่ติดกันเท่านั้น (เลนต่างกันเท่ากับ 1)
-     * ตรวจเช็คความสอดคล้องของระยะฐานล้อ (Wheelbase) ทุก ๆ เพลา (ต่างกันไม่เกิน 30 ซม.)
-     * ตรวจเช็คความเร็วเฉลี่ยของรถใกล้เคียงกัน (ต่างกันไม่เกิน 15 กม./ชม.)
-   - ยุบรวมข้อมูลเพลา (Merge) ซ้ายขวาเข้าเป็นแถวเดียวกันพร้อมทำรายงานน้ำหนักรวม (GVW) ที่ถูกต้อง และบันทึก Log รายละเอียดน้ำหนักล้อก่อนและหลังการควบรวมเพื่อความโปร่งใสและตรวจสอบได้ง่าย
+     * **ยอมให้จำนวนเพลาต่างกันได้ตาม `straddling_axle_tol` (default 3 เพลา)** — เซ็นเซอร์ 2 เลนนับเพลาไม่ตรงกันได้
+     * **Evidence gate:** เมื่อเพลาต่าง ≥2 ต้องมีหลักฐานยืนยัน — "ด้านศูนย์ตรงข้าม" (L0↔R0) **หรือ** WIM ติดธงคร่อมเลนทั้งคู่ (กันรวมผิดคัน)
+     * **ใช้การจัดเรียงเพลาแบบ best-shift ตามตำแหน่งเพลาสะสม** (ความต่างไม่เกิน 30 ซม.) เมื่อจำนวนเพลาไม่เท่ากัน
+     * ตรวจเช็คความเร็วใกล้เคียงกัน (ต่างกันไม่เกิน 15 กม./ชม.)
+   - ยุบรวมเพลาซ้าย-ขวาเป็นแถวเดียว **แล้วคำนวณ class/violation/ESAL ใหม่บนน้ำหนักรวม** (ครึ่งคันมี class/น้ำหนักเกินผิด) พร้อม Log น้ำหนักล้อก่อน-หลังรวมเพื่อตรวจสอบได้
+   - **Same-lane fragment combine:** ถ้า controller เลนเดียวตัดรถยาวเป็น 2 ท่อน จะรวมท่อนหน้า-หลังก่อน แล้วรอจับคู่ข้ามเลนต่อ
+   - **Edge-Drift Mirror (รถไหลทาง):** รถชิดขอบถนน/เกาะกลางที่ล้อข้างหนึ่งพ้นเซ็นเซอร์ (ไม่มีคู่ให้ merge) จะ mirror น้ำหนักฝั่งที่วัดได้เป็น **"ค่าประมาณ"** (`is_estimated`, ห้ามใช้ตรวจน้ำหนักเกิน) — เปิดผ่าน `mirror_edge_zones` ใน DB (default ปิด)
+   - รายละเอียดเต็ม: [docs/straddling-detection.md](docs/straddling-detection.md) · ตั้งค่า: [docs/config-guide.md](docs/config-guide.md)
 
 
 6. **Dynamic Database Configuration**
@@ -131,17 +130,19 @@ imps_service/
 │   │   ├── wsService.js             # ตัวส่งข้อมูลผลลัพธ์ผ่าน WebSocket ไคลเอนต์ไปยังเซิร์ฟเวอร์แสดงผล
 │   │   └── snapshotCleanupService.js# บริการลบรูปภาพและฐานข้อมูลเก่าอัตโนมัติเวลาเที่ยงคืน
 │   └── utils/
-│       ├── index.js                 # ส่งออกตัวช่วยระบบ (Mappers, Loggers)
 │       ├── logger.js                # จัดการการบันทึก Log ไฟล์ด้วย winston (แบ่งโฟลเดอร์รายวัน)
-│       ├── ocrService.js            # สื่อสารกับ OCR, ดึงค่าป้ายทะเบียน และทำการ Crop รูปภาพป้ายทะเบียน
-│       ├── snapshot.js              # จัดการเขียนไฟล์ภาพ และประมวลผลไฟล์ภาพในระบบ
-│       ├── snapshotManager.js       # จัดการเรื่องกล้องถ่ายภาพ, Smart Retry ดึงภาพ, อัปโหลดภาพ
-│       ├── snapshotRegistry.js      # ตัวเก็บ Registry ในเมมโมรี่เพื่อความเร็วในการดึงรูป
+│       ├── perfMonitor.js           # ตัววัดประสิทธิภาพระบบ (Latencies, Counts, CPU, RAM)
+│       ├── ocrService.js            # สื่อสารกับ OCR, ดึงค่าป้ายทะเบียน และ Crop รูปป้าย (gate ด้วย OCR_DEBUG)
+│       ├── snapshotManager.js       # จัดการกล้องถ่ายภาพ, Smart Retry ดึงภาพ, อัปโหลดภาพ
+│       ├── snapshotRegistry.js      # Registry ในเมมโมรี่ (30s TTL, prune throttle) เพื่อความเร็วในการดึงรูป
 │       └── mappers/
-│           ├── mapConfigurationKeys.js # แปลงรูปแบบคีย์ของการตั้งค่าจากฐานข้อมูลให้เป็น camelCase
-│           └── mapDataLogger.js     # คำนวณ/จำแนกรถ, ESAL, กฎคัดกรอง (GVW/length) และ straddling merge
+│           ├── mapConfigurationKeys.js # แปลงคีย์การตั้งค่าจาก DB เป็น camelCase
+│           └── mapDataLogger.js     # จำแนกรถ/ESAL/กฎคัดกรอง + straddling merge / edge-mirror / fragment combine
 ├── scripts/
-│   └── generate-snap-doc-pdf.js     # สคริปต์สร้างไฟล์คู่มือและรายงานการแก้ไขด้วย Puppeteer
+│   ├── validate.js                  # ตรวจ syntax ทุกไฟล์ใน src/ (ใช้ใน npm test)
+│   ├── test-mappers.js              # Unit test ของ mappers (ใช้ใน npm test)
+│   ├── find-unused.js               # ค้นหาโค้ด/ไฟล์ที่ไม่ถูกใช้งาน
+│   └── generate-snap-doc-pdf.js     # สคริปต์สร้างไฟล์คู่มือ/รายงานด้วย Puppeteer
 ├── public/                          # แหล่งเก็บรูปภาพชั่วคราวก่อนอัปโหลด
 ├── .env.example                     # ไฟล์ตัวอย่างสำหรับการตั้งค่า Environment Variables
 ├── package.json                     # ไฟล์จัดการ Dependencies และรันคำสั่ง
@@ -179,19 +180,24 @@ cp .env.example .env
 | `IMAGE_LPR_UPLOAD_URL` | API สำหรับอัปโหลดรูปป้ายทะเบียน (LPR) | `http://localhost:3003/api/upload/lpr` |
 | `IMAGE_CROP_UPLOAD_URL` | API สำหรับอัปโหลดรูปเฉพาะป้ายที่ถูกตัด (Crop) | `http://localhost:3003/api/upload/crop` |
 | `IMAGE_OVERVIEW_UPLOAD_URL` | API สำหรับอัปโหลดภาพมุมกว้าง (Overview) | `http://localhost:3003/api/upload/overview` |
-| `VMS_URL` | API สำหรับขับสัญญาณป้ายไฟ LED | `http://localhost:3006/api/vms` |
+| `VMS_URL` | ⚠️ *Deprecated/ไม่ถูกใช้* — โค้ดส่ง VMS ด้วย `led_url` จากตาราง `configuration` ใน DB ไม่ใช่ env นี้ | `http://localhost:3006/api/vms` |
 | `TRANSMISSION_URL` | API ส่วนกลางสำหรับรับส่งข้อมูลรถชั่งน้ำหนัก | `http://localhost:3007/api/vehicles/data-transmission` |
-| `THREE_DIMENSION_BASE` | URL บริการระบบสแกน 3D (ลบออกหากไม่มีสแกนเนอร์) | `http://10.1.28.20:3210` |
+| `THREE_DIMENSION_BASE` | URL บริการระบบสแกน 3D | `http://10.1.28.20:3210` |
 | `THREE_DIMENSION_DELAY` | หน่วงเวลาดึงข้อมูล 3D (มิลลิวินาที) | `5000` |
 | `THREE_DIMENSION_MAXIMUM_HEIGHT`| ความสูงจำกัดสูงสุดของยานพาหนะ (เซนติเมตร) | `350` |
-| `PICO_BASE` | URL ของเซ็นเซอร์ยางล้อ Pico (ลบออกหากไม่มี) | `http://192.168.145.110:8000` |
+| `PICO_BASE` | URL ของเซ็นเซอร์ยางล้อ Pico | `http://192.168.145.110:8000` |
 | `SNAP_MATCH_DB_POLL_MS` | ความถี่ในการตรวจสอบภาพถ่ายในฐานข้อมูลระหว่างรอดึงรูป (ms) | `1000` |
 | `SNAP_MATCH_MAX_WAIT_MS` | ระยะเวลารอภาพจากกล้องถ่ายภาพสูงสุด (ms) | `3000` |
 | `TRIGGER_HISTORY_WINDOW_MS` | ช่วงเวลาตรวจสอบประวัติการ Trigger กล้องย้อนหลังเพื่อหลีกเลี่ยงการถ่ายภาพสด (ms) | `3000` |
 | `METRICS_INTERVAL_MS` | ช่วงเวลารอบการบันทึกสรุปข้อมูลสถิติประสิทธิภาพการทำงาน (ms) | `300000` |
-| `METRICS_FORMAT` | รูปแบบของ Log แสดงผลลัพธ์ประสิทธิภาพ: `pretty` (มีกรอบสวยงาม) หรือ `compact` (บรรทัดเดียว) | `pretty` |
-| `SNAP_MATCH_BACK_MS` | ช่วงเวลาดึงรูปภาพแบบย้อนหลังกรณี Overwrite จากค่าตั้งต้น (ms) | `2000` |
-| `SNAP_MATCH_FWD_MS` | ช่วงเวลาดึงรูปภาพแบบล่วงหน้ากรณี Overwrite จากค่าตั้งต้น (ms) | `8000` |
+| `METRICS_FORMAT` | รูปแบบของ Log แสดงผลลัพธ์ประสิทธิภาพ: `pretty` หรือ `compact` | `pretty` |
+| `SNAP_MATCH_BACK_MS` | ช่วงเวลาดึงรูปภาพแบบย้อนหลังกรณี Override จากค่าตั้งต้น (ms) | `2000` |
+| `SNAP_MATCH_FWD_MS` | ช่วงเวลาดึงรูปภาพแบบล่วงหน้ากรณี Override จากค่าตั้งต้น (ms) | `8000` |
+| `TRIGGER_DEBOUNCE_MS` | Debounce trigger ต่อเลน (ซ้าย+ขวาของคันเดียวยิงแทบพร้อมกัน → ถ่าย snapshot ใบเดียว) | `250` |
+| `OCR_PREPROCESS` | เปิด pre-process ภาพก่อนส่ง OCR (sharpen/denoise/normalise) `1`=เปิด, ไม่ใส่=ปิด | `0` |
+| `OCR_DEBUG` | เปิด log วินิจฉัย OCR (`[OCR][raw]` response เต็ม + `[OCR][Crop]` พิกัด) `1`=เปิด, ไม่ใส่=ปิด | `0` |
+
+> **หมายเหตุ:** การจูน straddling / edge-mirror (`straddling_*`, `mirror_edge_zones`) อยู่ใน **ตาราง `configuration` ของ DB** ไม่ใช่ env — อ่านใหม่อัตโนมัติทุก 5 วินาที ดู [docs/config-guide.md](docs/config-guide.md)
 
 ---
 
@@ -228,8 +234,10 @@ npm run prod
 
 ---
 
-## 🧹 Maintenance (การบำรุงรักษา)
+## 🧹 Maintenance & Performance (การบำรุงรักษาและประสิทธิภาพ)
 - **Logs System**: ล็อกไฟล์จะถูกสร้างขึ้นมาในไดเรกทอรี `logs/` โดยจำแนกตามประเภทและแบ่งเป็นรายวัน
+- **Performance Monitoring**: มีระบบ `perfMonitor` คอยนับจำนวนรถ (Counts), วัดเวลาประมวลผล (Timings p50/p95), และตรวจสอบสุขภาพระบบ (CPU/RAM/Event Loop) สรุปลง Log ทุกๆ 5 นาที
+- **Hot-path Optimizations**: snapshot registry กวาด buffer แบบ throttle (ทุก ~5s ไม่ใช่ทุกรูป), insert `axles`/`axles_after_allowance`/`flags` แบบ batch ต่อ transaction, และ OCR ไม่ decode ภาพซ้ำตอน crop — ลดงานบน main thread/รอบ DB ต่อคัน
 - **Midnight Cleanup**: บริการ `snapshotCleanupService.js` จะลบรูปภาพในเครื่องและแถวชั่วคราวในตาราง `snapshots` ที่เก่ากว่าวันที่ตั้งค่าไว้ในฐานข้อมูล (`retention_days`) เพื่อป้องกันไม่ให้พื้นที่จัดเก็บของเซิร์ฟเวอร์เต็ม
 
 ---
@@ -244,4 +252,4 @@ npm run prod
 2. **Smart Retry:** `waitForImages` วนเรียก `findAndProcessSnapshots` ซ้ำสูงสุด 5 ครั้ง (2/4/6/8/10 วินาที) รอจน snapshot ถูก register
 3. **บันทึกแม้รูปไม่ครบ:** ถ้าครบรอบแล้วยังไม่มีรูป ระบบจะเก็บข้อมูลไว้ (log เป็น warning) แทนที่จะทิ้ง เพื่อกันข้อมูลหาย
 
-> **หมายเหตุสำคัญ:** ระบบ **ไม่มี** การสั่งกล้องถ่ายสดแบบ on-demand — ต้องพึ่งสัญญาณ Trigger จากฮาร์ดแวร์เท่านั้น รถที่ไม่เหยียบทริกเกอร์ (เช่น คร่อมเลนเลยแท่งซ้าย) จะได้ระเบียนที่ป้ายเป็น `N/A` การแก้อยู่ที่ **ระดับอุปกรณ์** (เปิด trigger channel ที่ 2 บนตัว WIM Logger) ไม่ใช่ที่ซอฟต์แวร์ — ตัวแปร `this.lastTriggerTimes` ยังถูกบันทึกไว้แต่ปัจจุบันไม่ได้ถูกใช้ทำ fallback
+> **หมายเหตุสำคัญ:** ระบบ **ไม่มี** การสั่งกล้องถ่ายสดแบบ on-demand — ต้องพึ่งสัญญาณ Trigger จากฮาร์ดแวร์เท่านั้น รถที่ไม่เหยียบทริกเกอร์ (เช่น คร่อมเลนเลยแท่งซ้าย) จะได้ระเบียนที่ป้ายเป็น `N/A` การแก้อยู่ที่ **ระดับอุปกรณ์** (เปิด trigger channel ที่ 2 บนตัว WIM Logger) ไม่ใช่ที่ซอฟต์แวย์ — ตัวแปร `this.lastTriggerTimes` ยังถูกบันทึกไว้แต่ปัจจุบันไม่ได้ถูกใช้ทำ fallback

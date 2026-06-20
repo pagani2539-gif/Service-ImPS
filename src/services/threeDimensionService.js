@@ -1,6 +1,7 @@
 const axios = require('axios');
 const dayjs = require('dayjs');
 const pool = require('../config/db');
+const logger = require('../utils/logger');
 
 const threeDimensionDelay = process.env.THREE_DIMENSION_DELAY || 0
 const threeDimensionMaximumHeight = process.env.THREE_DIMENSION_MAXIMUM_HEIGHT || 350
@@ -66,11 +67,9 @@ async function getThreeDimension(tdBase, vehicle, vehicleID) {
 
       const vehiclePlate = normalizePlate(vehicle.licensePlate);
       let found = null;
-      console.log('timestamp :', vehicle.stamp)
       for (const item of rows) {
         const threeDimensionLicensePlate = normalizePlate(item.license_plate);
         if (threeDimensionLicensePlate && vehiclePlate && threeDimensionLicensePlate === vehiclePlate) {
-          console.log('compare license : ', vehiclePlate, threeDimensionLicensePlate, item.timestamp)
           const rawHeight = item.hight ?? item.height ?? null;
           const overHeight = isOverHeight(rawHeight);
           found = {
@@ -97,7 +96,7 @@ async function getThreeDimension(tdBase, vehicle, vehicleID) {
       throw err;
     }
   } finally {
-    console.log(`[PERF] getThreeDimension took ${Date.now() - startTime}ms`);
+    logger.info(`[PERF] getThreeDimension took ${Date.now() - startTime}ms`);
   }
 }
 

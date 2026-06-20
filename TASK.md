@@ -1,140 +1,100 @@
 # TASK — IMPS Service Performance Optimization
 
-> สรุปงาน optimize ทั้งหมด — ห้ามแก้ MySQL/schema/SQL, ไม่แตะ WIM calculation, ไม่เปลี่ยน sensor/protocol/API output
-> อัปเดตล่าสุด: 2026-06-14
+> สรุปงาน optimize ทั้งหมด — ห้ามแก้ schema เชิงโครงสร้าง, ไม่แตะ WIM calculation, ไม่เปลี่ยน sensor/protocol/API output
+> อัปเดตล่าสุด: 2026-06-20
 
 ## สถานะรวม
 
 | รอบ | โฟกัส | สถานะ |
 |---|---|---|
-| 1 | Refactor + snapshot matching (event-driven) | ✅ เสร็จ (uncommitted) |
-| 2 | ลด work ซ้ำ + startup + logging | ✅ เสร็จ (uncommitted) |
-| 3 | Monitoring/Metrics + Stability + dedup | ✅ เสร็จ (uncommitted) |
-| 4 | Pipeline logging + Straddle fix + ลบ InterComp | ✅ commit `78bb0b8` |
-| — | งานเสนอแยก (นอก constraints) | ⬜ รออนุมัติ |
+| 1 | Refactor + snapshot matching (event-driven) | ✅ เสร็จ |
+| 2 | ลด work ซ้ำ + startup + logging | ✅ เสร็จ |
+| 3 | Monitoring/Metrics + Stability + dedup | ✅ เสร็จ |
+| 4 | Pipeline logging + Straddle violation recalc + ลบ InterComp | ✅ เสร็จ (`78bb0b8`) |
+| 5 | Documentation update | ✅ เสร็จ (2026-06-16) |
+| — | Straddle finish (error-drop / zero-side / re-classify / trigger debounce / edge-mirror) | ✅ เสร็จ (`fdce4f5`) |
+| 6 | Bottleneck fixes (P1–P4) + doc sync | ✅ เสร็จ (2026-06-20) |
 
 ---
 
-## รอบ 1 — Refactor & Snapshot Matching ✅
+## รอบ 6 — Bottleneck Fixes (P1–P4) ✅ (2026-06-20)
 
-- [x] เปลี่ยน flow เป็น **รอรูปครบก่อน insert** (`waitForImages`) แทน retry หลัง insert → ข้อมูล+รูปขึ้น DB พร้อมกัน
-- [x] **Event-driven** snapshot registry (`waitForRegister`) — ตื่นทันทีเมื่อมีรูปใหม่ แทน poll DB ทุก 150ms
-- [x] เช็ค DB เฉพาะรอบแรก + ทุก `SNAP_MATCH_DB_POLL_MS` (1s)
-- [x] insert snapshot ลง DB แบบไม่บล็อก (memory เป็นแหล่งหลัก)
-- [x] Cache config ราย lane (`lprConfigByLane` / `overviewConfigByLane`) แทน `.find()` ทุก trigger
-- [x] Cache `ensureDir` + เปลี่ยน `fs.existsSync` → `fs.pathExists` (async)
-- [x] console → winston logger (services + utils)
+ตรวจ bottleneck ทั้ง pipeline แล้วแก้เฉพาะที่ "ลดงานซ้ำซ้อน คงพฤติกรรมเดิม" (เทียบ risk กับ SKILL.md):
 
-**ไฟล์:** `snapshotManager.js`, `snapshotRegistry.js`, `WSController.js`, `wsService.js`, `transmissionService.js`, `ledDisplayService.js`, `picoService.js`
+- [x] **P1** — `snapshotRegistry.register()` throttle buffer-prune (ทุก ~5s แทนทุกรูป) ผ่าน `lastBufferPrune`
+  — เดิมกวาดทั้ง map ทุก register บน main thread; prune รัน *หลัง* `_notifyWaiters` จึงไม่กระทบความเร็วจับคู่รูป
+- [x] **P2** — `ocrService.clampRectToImage` คืน `{rect, meta}` ใช้ meta ซ้ำใน crop (เดิม decode ภาพเดิม 3 รอบ/ป้าย)
+- [x] **P3** — gate `[OCR][raw]` + `[OCR][Crop]` ไว้หลัง `OCR_DEBUG=1` (ปิด default) — ลด disk I/O/CPU ต่อป้าย
+- [x] **P4** — `vehiclesService.insertAxlesAfterAllowances` เปลี่ยนเป็น batch `VALUES ?` (เดิม INSERT ทีละเพลา)
 
----
+**ไฟล์:** `snapshotRegistry.js`, `ocrService.js`, `vehiclesService.js`
+**ผล:** `vehicle_total_ms`/`db_insert_ms`/`ocr_ms` ทรงหรือลดลง, `Loop Delay P99` นิ่งขึ้นช่วงรถถี่ — ผลลัพธ์ใน DB/รูปเท่าเดิม
 
-## รอบ 2 — ลด Work ซ้ำ + Startup + Logging ✅
-
-- [x] **OCR in-memory cache** (`ocrResultCache`, key = imageUrl, cap 50) — retry ไม่ re-OCR/re-crop รูปใบเดิม (cache เฉพาะผลสำเร็จ)
-- [x] ลบ **dead HTTP call** `getSingleDualTire` (ผลไม่ถูกใช้) + import + `PICO_BASE`
-- [x] `Promise.all` startup fetches ใน `app.js` (config / vehicleClasses / singleTires ยิงขนาน)
-- [x] console → logger ที่เหลือใน controllers
-- [x] แก้ `.env.example`: `SNAP_MATCH_POLL_MS` → `SNAP_MATCH_DB_POLL_MS`
-
-**ไฟล์:** `DataLogger.js`, `InterComp.js`, `app.js`, `.env.example`
-
-**ตัดสินใจไว้:** คงลำดับ `transmitVehicle` ไว้หลัง 3D ตามเดิม (ผู้ใช้เลือก)
+### พิจารณาแล้ว — คงเดิม/เลื่อน
+- **P5 (isolation level → connection event):** เลื่อน — แตะ `db.js` (ไฟล์อ่อนไหว, รัน migration) กำไรแค่ ~1 RTT/คัน ไม่คุ้มเสี่ยง
+- **P6 (ย้าย transmit ก่อน 3D):** **คงเดิม** — ลำดับ 3D→transmit ปัจจุบันการันตีว่าส่วนกลางเห็น 3D ก่อนถูกแจ้ง (ย้ายแล้วเสี่ยงข้อมูลหาย)
+- **P7 (pool recreate ไม่อัปเดต export ref ใน `db.js`):** note resilience — รอยืนยันก่อนแตะ
 
 ---
 
-## รอบ 3 — Monitoring + Stability ✅
+## commit `fdce4f5` — Straddle finish ✅
 
-- [x] 🔴 **Fix ghost controller** — `WSController` clear reconnect timer ใน `closeSockets()` + guard `shouldReconnect` ที่ `initDataSocket`/`initTriggerSocket` → กัน controller เก่าเปิด socket กลับมาเองหลัง config เปลี่ยน (root cause ของ duplicate + memory leak)
-- [x] **Dedup** data message ซ้ำ (`_isDuplicateMessage`, key `lane:id`, window 60s, cap 500) + log `[Dedup]`
-- [x] **perfMonitor.js** (ใหม่) — counters / latency p50·p95·max / in-flight gauge / event-loop lag / CPU / RSS → สรุปลง log ทุก `METRICS_INTERVAL_MS` (default 5 นาที)
-- [x] Instrument ทุกทางออกของ handler: `received`, `inserted`, `dropped_*` (6 เหตุผล), `straddle_*`, `handler_error`, `trigger_received`
-- [x] จับเวลาราย stage ต่อคัน: `find / imageWait / insert / sensorToDb`
-- [x] นับ `db_pool_enqueue` (ตัวชี้ connection pool อิ่มตัว)
-- [x] `.env.example`: เพิ่ม `METRICS_INTERVAL_MS`
+- [x] **Drop controller error (GVW=-1):** ตัดทิ้งทันที (reading เสียทั้งใบ ห้าม merge)
+- [x] **Zero-side detection** (`_isZeroSideStraddle`/`_zeroSideClass`): ตรวจ "ฝั่งศูนย์" เอง เผื่อ WIM ไม่ติดธงให้ครึ่งคัน + ใช้ L0↔R0 เป็นหลักฐานจับคู่ (evidence gate)
+- [x] **Re-classify หลัง merge/edge-mirror:** คำนวณ class/violation/ESAL/flags ใหม่บนน้ำหนักรวม
+- [x] **Same-lane fragment combine** (`combineSameLaneFragments`): รวมรถยาวที่ controller เลนเดียวตัดเป็น 2 ท่อน ก่อนรอจับคู่ข้ามเลน
+- [x] **Edge-drift mirror** (`_tryEdgeMirror`/`mirrorEdgeAxles`): กู้รถไหลทางชิดขอบเป็น "ค่าประมาณ" (`is_estimated`, ไม่ตรวจน้ำหนักเกิน) เปิดผ่าน `mirror_edge_zones` ใน DB
+- [x] **Trigger debounce ต่อเลน** (`TRIGGER_DEBOUNCE_MS`, default 250): ซ้าย+ขวาของคันเดียวยิงแทบพร้อมกัน → ถ่าย snapshot ใบเดียว
+- [x] **MIN_AXLES filter:** ตัดรถ <2 เพลา (noise/มอไซค์/จับไม่ครบ) ตั้งแต่ต้น
 
-**ไฟล์:** `WSController.js`, `perfMonitor.js` (ใหม่), `DataLogger.js`, `InterComp.js`, `db.js`, `.env.example`
+**ไฟล์:** `DataLogger.js`, `mapDataLogger.js`, `db.js` (auto-add คอลัมน์ straddle/edge), `mapConfigurationKeys.js`
+**เอกสาร:** `docs/straddling-detection.md`, `docs/config-guide.md`
 
 ---
 
-## รอบ 4 — Pipeline Logging + Straddle Fix + ลบ InterComp ✅ (commit `78bb0b8`)
+## รอบ 1–5 (สรุปย่อ)
 
-- [x] **Pipeline logging (info, เปิดตลอด)** ครอบทั้ง DataLogger — ไล่รถ 1 คันด้วย ID เดียวได้: `[RX]` → `[Pipeline] Classified` → `[Filter] Dropped <เหตุผล>` → `[LED]` → save → `[Snapshot] Found` → `[OCR]` → `[Upload]` → `[Transmit]` → `🚗 [Vehicle Saved]`
-- [x] **console.* → logger** ใน `ocrService` / `ledDisplayService` (เดิมไม่ลงไฟล์) + เลื่อน log ส่งออกสำเร็จจาก debug → info
-- [x] เพิ่มบรรทัดสรุปต่อคัน `🚗 [Vehicle Saved]` ให้ DataLogger (เดิมมีแต่ InterComp)
-- [x] 🔴 **Straddle bugfix:** คำนวณ `setViolation`/`calculateESAL` ใหม่หลัง merge — เดิมรถคร่อมเลนที่รวมแล้วน้ำหนักเกิน ถูกบันทึกว่า "ผ่าน" เพราะ violation คิดจากน้ำหนักครึ่งเดียว
-- [x] **Straddle instrument (ชั้น 1):** log ทุก candidate (`[Straddling][Compare]` dTime/dWheelbase/dSpeed + zero-side `L0/R0`) และ orphan (`[Straddling][Orphan]`) เพื่อสืบว่าทำไมจับคู่ไม่ได้ — เงื่อนไข merge เท่าเดิม (refactor พิสูจน์แล้ว)
-- [x] **ลบ InterComp ทั้งหมด** (`InterComp.js`, `mapInterComp.js`) — หน้างานใช้แค่ DataLogger; ย้าย `ignoreGVW`/`isIgnoredLength` เข้า `mapDataLogger`, ตัด branch `controller_id===2` ใน `app.js`, ตัด export ใน `utils/index.js`, ตัด test ของ InterComp
+- **รอบ 1 — Refactor & Snapshot Matching:** รอรูปครบก่อน insert (`waitForImages`), event-driven registry (`waitForRegister`), เช็ค DB เฉพาะรอบแรก + ทุก `SNAP_MATCH_DB_POLL_MS`, insert snapshot ลง DB แบบไม่บล็อก, cache config ราย lane, `fs.existsSync`→`fs.pathExists`, console→winston
+- **รอบ 2 — ลด work ซ้ำ:** OCR in-memory cache (`ocrResultCache`, cap 50), `Promise.all` startup fetches ใน `app.js`, แก้ `.env.example` (`SNAP_MATCH_DB_POLL_MS`)
+- **รอบ 3 — Monitoring + Stability:** 🔴 fix ghost controller (clear reconnect timer + `shouldReconnect` guard), dedup data message ซ้ำ (`_isDuplicateMessage`), **perfMonitor.js** (counters/latency p50·p95·max/in-flight/event-loop lag/CPU/RSS), นับ `db_pool_enqueue`
+- **รอบ 4 — Pipeline logging + Straddle bugfix:** pipeline logging ครอบทั้ง DataLogger, 🔴 คำนวณ `setViolation`/`calculateESAL` ใหม่หลัง merge (เดิมรถคร่อมเลนน้ำหนักเกินถูกบันทึกว่า "ผ่าน"), straddle instrument (`[Compare]`/`[Orphan]`), **ลบ InterComp ทั้งหมด** (หน้างานใช้แค่ DataLogger; ย้าย `ignoreGVW`/`isIgnoredLength` เข้า `mapDataLogger`)
+- **รอบ 5 — Documentation:** อัปเดต README/SKILL + docs (straddling/config-guide)
 
-**ไฟล์:** `DataLogger.js`, `mapDataLogger.js`, `snapshotManager.js`, `ocrService.js`, `transmissionService.js`, `wsService.js`, `ledDisplayService.js`, `app.js`, `utils/index.js`, `test-mappers.js` (+ ลบ `InterComp.js`, `mapInterComp.js`)
+---
 
-> **แก้ความเข้าใจผิดจากรอบก่อน:** "Zero-Delay On-Demand Fallback" (Task 3) **ถูกถอดออกจากโค้ดแล้ว** — ปัจจุบันใช้ `waitForImages` retry 5 ครั้งแล้วบันทึกแม้รูปไม่ครบ ไม่มีการสั่งถ่ายสด on-demand การแก้ N/A plate ทำที่ตัวเครื่อง (เปิด trigger channel 2)
+## งานเสนอแยก (นอก constraints)
+
+- [x] **Batch INSERT `axles_after_allowance`** — เสร็จในรอบ 6 (P4)
+- [~] `SET TRANSACTION ISOLATION LEVEL` ต่อ insert (+1 RTT) — พิจารณาแล้ว เลื่อน (P5)
+- [~] ย้าย `transmitVehicle` ขึ้นก่อน 3D — พิจารณาแล้ว คงเดิม (P6: ปลายทางต้องรองรับ 3D ที่ยังไม่มา)
+- [ ] P7: `db.js` pool recreate ไม่อัปเดต reference ที่ export — resilience รอยืนยัน
+
+## จูนได้เองที่ config (ไม่ต้องแก้โค้ด)
+
+- `THREE_DIMENSION_DELAY` (env)
+- `delay_capture_overview`, `straddling_*`, `mirror_edge_zones` (ตาราง `configuration`)
+- `LOG_LEVEL=info` ใน production (กัน debug ท่วม) · `OCR_DEBUG=1` เมื่อต้องไล่ปัญหา crop
+- `METRICS_INTERVAL_MS` — รอบสรุป metrics
+
+## นอกขอบเขต repo นี้
+- Frontend / API / pagination — อยู่คนละ service (:4000 / :3007)
 
 ---
 
 ## Verification ✅
-
-- [x] `npm test` — syntax check 24 ไฟล์ + mapper unit tests ผ่านครบ (ยืนยัน business logic ไม่เปลี่ยน)
-- [x] Smoke test `perfMonitor` — `[Metrics]` แสดง counts/timings/inflight/cpu/mem ถูกต้อง
-- [ ] e2e จริง — ต้องมีตาชั่ง/กล้อง/MySQL จริง (รันที่หน้างาน)
-
----
-
-## งานเสนอแยก (นอก constraints) ⬜
-
-- [ ] **Batch INSERT `axles_after_allowance`** (`vehiclesService.js:73`) — ตอนนี้ INSERT ทีละแถวใน loop (รถ 7 เพลา = 7 round trips/transaction) → ต้องเปลี่ยนข้อความ SQL จึงขัด "Do NOT change SQL"
-- [ ] ทบทวน `SET TRANSACTION ISOLATION LEVEL` ต่อ insert ทุกคัน (+1 RTT) — เปลี่ยน transaction semantics
-- [ ] ย้าย `transmitVehicle` ขึ้นก่อน 3D — ต้องให้ปลายทาง (frontend/transmission) รองรับว่า 3D rows อาจยังไม่มีตอนรับแจ้ง
-
-## จูนได้เองที่ config (ไม่ต้องแก้โค้ด)
-
-- `THREE_DIMENSION_DELAY` (env) — ปัจจุบันตัวอย่าง 5000ms
-- `delay_capture_overview` (ตาราง configuration)
-- `LOG_LEVEL=info` ใน production (กัน debug log ท่วม)
-- `METRICS_INTERVAL_MS` — รอบสรุป metrics
-
-## นอกขอบเขต repo นี้
-
-- Frontend / API / pagination / bundle — อยู่คนละ service (:4000 / :3007)
+- [x] `npm test` — syntax check **20 ไฟล์** + mapper unit tests ผ่านครบ (ยืนยัน business logic ไม่เปลี่ยน)
+- [x] Smoke `perfMonitor` — `[Metrics]` แสดง counts/timings/inflight/cpu/mem ถูกต้อง
+- [ ] e2e จริง — ต้องมีตาชั่ง/กล้อง/MySQL จริง (รันที่หน้างาน) + เทียบ `[Metrics]` ก่อน/หลังรอบ 6
 
 ---
 
-## Task 1 — แก้ภาพ LPR ไม่ตรงตำแหน่ง (อ่านป้ายไม่ได้) 🔬 instrument แล้ว รอ tune
+## งานค้าง — Task: ภาพ LPR ไม่ตรงตำแหน่ง (อ่านป้ายไม่ได้) 🔬 instrument แล้ว รอ tune หน้างาน
 
-**อาการ:** ภาพหน้ารถถ่ายไม่ตรง อ่านป้ายไม่ได้ — สุ่ม (ข้อ 1 เห็นท้ายรถ + ข้อ 3 รูปคนละคัน)
-**Root cause:** mis-claim ใน `claimClosest` — forward window `maximum_search` (+8s) กว้างไป รถคันหนึ่งคว้ารูปของคันถัดไป → คันถัดไปตก live fallback (ภาพท้ายรถ)
+**อาการ:** ภาพหน้ารถถ่ายไม่ตรง อ่านป้ายไม่ได้ (สุ่ม: เห็นท้ายรถ / รูปคนละคัน)
+**Root cause:** mis-claim ใน `claimClosest` — forward window `maximum_search` (+8s) กว้างไป รถคันหนึ่งคว้ารูปของคันถัดไป
 
-- [x] Match window override ผ่าน env (`SNAP_MATCH_BACK_MS`/`SNAP_MATCH_FWD_MS`) — ไม่ต้องแก้ DB
-- [x] Trigger-history window ปรับได้ (`TRIGGER_HISTORY_WINDOW_MS`, โค้ดเดิม 3000 / design 15000)
-- [x] Diagnostic: `snap_offset_lpr/overview_ms` (p50/p95/min/max) + counter `snap_fallback_lpr/overview` ใน `[Metrics]`
-- [x] perfMonitor `_stats` เพิ่ม `min`
+- [x] Match window override ผ่าน env (`SNAP_MATCH_BACK_MS`/`SNAP_MATCH_FWD_MS`)
+- [x] Diagnostic: `snap_offset_lpr/overview_ms` (p50/p95/min/max) ใน `[Metrics]`
 - [ ] **รัน → อ่าน `snap_offset_*_ms` → ตั้ง `SNAP_MATCH_FWD_MS` ให้พอครอบ p95** (ตัด outlier ที่คว้าคันถัดไป)
-- [ ] ยืนยัน `snap_fallback_*` ลดลงหลัง tune
 
-**ไฟล์:** `snapshotManager.js`, `snapshotRegistry.js` (window), `DataLogger.js`, `InterComp.js`, `perfMonitor.js`, `.env.example`
-
-## Task 2 — เพิ่มความแม่นยำในการยุบรวมรถวิ่งคร่อมเลน (Straddling Merge) & บันทึก Log ✅
-- [x] ตรวจสอบเวลาระดับมิลลิวินาที (ต่างกันไม่เกิน 1,000 ms หรือตาม config)
-- [x] ตรวจสอบระยะฐานล้อ (Wheelbase) ของเพลาคู่ขนาน (ความต่างไม่เกิน 30 ซม.)
-- [x] ตรวจสอบความสอดคล้องของความเร็ว (ต่างกันไม่เกิน 15 กม./ชม.)
-- [x] บังคับเลนที่ต้องอยู่ติดกันเสมอ (Adjacent Lanes)
-- [x] เพิ่ม Log รายละเอียดการยุบรวม แสดงน้ำหนักเพลาก่อนและหลังรวม
-- [x] [Bugfix] เพิ่มฟังก์ชันตรวจสอบ 3D Dimension Scanner ในกรณี fallback ของรถคร่อมเลน (`processFinalVehicle`)
-
-**ไฟล์:** `DataLogger.js`, `InterComp.js`
-
-## Task 3 — การเพิ่มความเร็วและเสถียรภาพ (Memory-Cache Buffer, Asynchronous Background Flow, Zero-Delay Fallback, Ghost Record Cleanup) ✅
-- [x] **Memory-Cache Buffer:** พัฒนาระบบเก็บ Binary Image Buffer ใน RAM บน Snapshot Registry โดยมีอายุ TTL 30 วินาที เพื่อป้อนให้ OCR Service ประมวลผลได้ทันทีโดยไม่ต้องอ่านจากฮาร์ดดิสก์ (ลด Disk I/O)
-- [x] **Asynchronous Background Flow (ทางเลือก B):** ปรับจูนโฟลว์การทำงานใน DataLogger และ InterComp ให้บันทึกข้อมูลรถและน้ำหนักลง MySQL ทันที (~20ms) และส่งข้อมูลจอ LED (VMS) ทันที จากนั้นย้ายการค้นหารูปภาพ, OCR, อัปโหลด, และการคำนวณ 3D ไปทำแบบเบื้องหลัง (Background Async Task) โดยจะส่ง WebSocket สัญญาณและ HTTP ส่งเซิร์ฟเวอร์หลักหลังจากได้รูปครบ เพื่อไม่ให้หน้าเว็บ UI ต้องรีเฟรช F5
-- [x] **Zero-Delay Fallback:** ใช้ `inFlightDownloads` ติดตามสถานะกล้องร่วมกับ Cache ตรวจสอบสิทธิ์การใช้งาน หากรถไม่เหยียบเซ็นเซอร์ จะสั่งถ่ายภาพสดโดยไม่ต้องหน่วงเวลา 3 วินาที
-- [x] **Ghost Record Cleanup:** เพิ่มฟังก์ชัน `deleteVehicleFromDatabase` ย้อนหลังหากภาพผล OCR ประมวลผลพบว่าเป็นรถประเภท Excluded ป้องกันไม่ให้เกิดข้อมูลขยะใน Database
-- [x] **ปรับปรุงความสูงของข้อมูล LOG:** ปรับรูปแบบความยาวและโครงสร้าง logs ให้เรียงความกว้างของฟิลด์และพิมพ์ผลลัพธ์ในบรรทัดใหม่เมื่อมี error/stack trace
-
-**ไฟล์:** `DataLogger.js`, `InterComp.js`, `snapshotRegistry.js`, `snapshotManager.js`, `ocrService.js`, `logger.js`
-
-## ขั้นต่อไป
-
-- [ ] Commit งานทั้งหมดและจัดระเบียบ branch
-- [ ] Deploy + เฝ้าดู `[Metrics]` 1 รอบ (5 นาที) หา bottleneck จริงหน้างาน
-
-
+**ไฟล์:** `snapshotManager.js`, `snapshotRegistry.js`, `DataLogger.js`, `perfMonitor.js`, `.env.example`
