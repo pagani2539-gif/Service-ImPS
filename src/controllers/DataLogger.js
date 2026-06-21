@@ -24,6 +24,7 @@ const {
 const SnapshotManager = require("../utils/snapshotManager");
 const { snapshotRegistry, normalizeLane } = require("../utils/snapshotRegistry");
 const dayjs = require("dayjs");
+const axios = require("axios");
 const ocrService = require("../utils/ocrService");
 const pool = require("../config/db");
 const path = require("path");
@@ -35,6 +36,9 @@ const baseLedPath = path.join(process.cwd(), "public/leds");
 const transmissionUrl = process.env.TRANSMISSION_URL || '';
 // ซ้าย(ch1)+ขวา(ch2) ของรถคันเดียวยิง trigger แทบพร้อมกัน — ถ่าย snapshot ใบเดียวภายในช่วงนี้พอ
 const TRIGGER_DEBOUNCE_MS = Number(process.env.TRIGGER_DEBOUNCE_MS) || 250;
+// HEAD readiness check: รอจนไฟล์รูป serve ได้จริงก่อนแจ้ง browser (กันภาพ 404 ต้องกด F5) — ปรับผ่าน env ได้
+const TRANSMIT_READY_CAP_MS  = Number(process.env.TRANSMIT_READY_CAP_MS)  || 1500; // เพดานรอสูงสุด (กันค้างถ้า image server ล่ม)
+const TRANSMIT_READY_POLL_MS = Number(process.env.TRANSMIT_READY_POLL_MS) || 50;   // ความถี่เช็คไฟล์
 const threeDimensionBase = process.env.THREE_DIMENSION_BASE || '';
 // ค่าคงที่ทางกายภาพ (สากล ไม่ขึ้นกับสถานี → hardcode, ไม่ต้องตั้ง DB; override ผ่าน env ได้ถ้าจำเป็น)
 const FRAGMENT_MAX_GAP_CM = Number(process.env.FRAGMENT_MAX_GAP_CM) || 2500; // รถยาวสุด ~25ม. — เกินนี้ = คนละคัน ไม่ใช่เศษรถเดียว
@@ -591,31 +595,62 @@ class DataLogger extends WSController {
     }
   }
 
-  // หน่วง 150ms กัน browser ขอรูปก่อนที่ image server จะเขียนไฟล์เสร็จ (ค่าเดิม) โดยไม่ค้าง handler
-  transmitVehicle(vehicleID, isTruck = true) {
-    setTimeout(() => {
-      if (isTruck) logger.info(`[Transmit] (VehicleID: ${vehicleID}) Dispatching to WS + central`);
-      sendToWebSocket({ vehicleID });
-      sendToTransmission(transmissionUrl, { vehicleID });
-    }, 150);
+  // แจ้ง browser เมื่อ "ไฟล์รูป serve ได้จริง" แทนการหน่วงตายตัว (กันภาพ 404 ต้องกด F5)
+  // รถปกติไฟล์พร้อมเร็ว → แจ้งเกือบทันที; image server ช้า → รอจนพร้อม (มี cap กันค้าง)
+  async transmitVehicle(vehicleID, mappedData, isTruck = true) {
+    await this._waitImagesServable(mappedData);
+    if (isTruck) logger.info(`[Transmit] (VehicleID: ${vehicleID}) Dispatching to WS + central`);
+    sendToWebSocket({ vehicleID });
+    sendToTransmission(transmissionUrl, { vehicleID });
+  }
+
+  // รอจนรูปทุกใบ (overview/lpr) เปิดได้จริงผ่าน HTTP หรือครบ cap แล้วแจ้งไปเลย (กันรถหาย)
+  async _waitImagesServable(mappedData) {
+    const all = [mappedData.overviewPath, mappedData.platePath].filter(Boolean);
+    // เช็คได้เฉพาะ absolute http(s) URL — ถ้า fileUrl เป็น path เปล่า HEAD ไม่ได้ → ข้าม (ไม่บล็อก)
+    const urls = all.filter((u) => /^https?:\/\//i.test(u));
+    if (all.length && !urls.length && !this._warnedRelativeUrl) {
+      logger.warn(`[Transmit] image fileUrl ไม่ใช่ absolute URL — ข้ามการเช็ค servable (ID: ${mappedData.id}); ตรวจค่าที่ image server ส่งกลับ`);
+      this._warnedRelativeUrl = true;
+    }
+    if (!urls.length) return; // ไม่มีรูป หรือเช็คไม่ได้ → แจ้งทันที
+    const deadline = Date.now() + TRANSMIT_READY_CAP_MS;
+    while (Date.now() < deadline) {
+      const ok = await Promise.all(urls.map((u) => this._isServable(u)));
+      if (ok.every(Boolean)) return; // พร้อมครบ → แจ้งทันที
+      await new Promise((r) => setTimeout(r, TRANSMIT_READY_POLL_MS));
+    }
+    logger.warn(`[Transmit] images not servable within ${TRANSMIT_READY_CAP_MS}ms (ID: ${mappedData.id}) — notifying anyway`);
+  }
+
+  // HEAD เช็คว่าไฟล์เปิดได้ไหม + cache-bust กัน proxy แคชผล 404 ของ probe ไปทับ URL จริงที่ browser โหลด
+  async _isServable(url) {
+    try {
+      const probe = `${url}${url.includes("?") ? "&" : "?"}_probe=${Date.now()}`;
+      const res = await axios.head(probe, { timeout: 1000 });
+      return res.status >= 200 && res.status < 300;
+    } catch {
+      return false;
+    }
   }
 
   /**
-   * รอรูป LPR/Overview ที่ยังขาดให้ครบ "ก่อน" insert (ตาราง retry เดิม: 2s,4s,6s,8s,10s)
+   * รอรูป LPR/Overview ที่ยังขาดให้ครบ — retry IMAGE_RETRY_COUNT รอบ ห่าง IMAGE_RETRY_DELAY_MS
+   * (default 3×0.5s; findSnapshots รอแบบ event-driven ~3s/รอบให้อยู่แล้ว จึงไม่ต้อง backoff ยาว)
    * คืน false เมื่อพบระหว่างรอว่าเป็นรถ excluded (ผู้เรียกต้องข้ามการ insert)
    * ถ้า retry หมดแล้วรูปยังไม่ครบ คืน true เพื่อบันทึกข้อมูลน้ำหนักกันข้อมูลหาย
    */
   async waitForImages(mappedData, findResult) {
-    const maxRetries = 5;
-    const retryDelayMs = 2000;
+    const maxRetries = Number(process.env.IMAGE_RETRY_COUNT) || 3;       // เดิม 5 (ตัด tail 8/10s)
+    const retryDelayMs = Number(process.env.IMAGE_RETRY_DELAY_MS) || 500; // คงที่ ไม่ไต่ขึ้น (เดิม 2000*attempt)
     let attempt = 0;
     let lprSnapshots = findResult ? findResult.lprSnapshots : null;
     let overviewSnapshots = findResult ? findResult.overviewSnapshots : null;
 
     while (attempt < maxRetries && (!mappedData.overviewPath || !mappedData.platePath)) {
       attempt++;
-      logger.info(`[Image Wait] Missing images for ID: ${mappedData.id}. Retrying in ${(retryDelayMs * attempt / 1000).toFixed(0)}s... (Attempt ${attempt}/${maxRetries})`);
-      await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+      logger.info(`[Image Wait] Missing images for ID: ${mappedData.id}. Retrying in ${(retryDelayMs / 1000).toFixed(1)}s... (Attempt ${attempt}/${maxRetries})`);
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
 
       const retryResult = await this.findAndProcessSnapshots(mappedData, lprSnapshots, overviewSnapshots);
 
@@ -800,8 +835,8 @@ class DataLogger extends WSController {
         } catch (err) { logger.error(`Error processing threeDimension: ${err.stack || err}`); }
       }
 
-      // ส่งสัญญาณ WebSocket และส่งข้อมูลไปส่วนกลาง
-      this.transmitVehicle(vehicleID, isTruck);
+      // ส่งสัญญาณ WebSocket และส่งข้อมูลไปส่วนกลาง (รอไฟล์ servable ก่อนแจ้ง)
+      await this.transmitVehicle(vehicleID, mappedData, isTruck);
     } catch (err) {
       logger.error(`Error in processImagesAndOcrInBackground for Vehicle ID ${vehicleID}: ${err.stack || err}`);
     }
