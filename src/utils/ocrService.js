@@ -4,12 +4,20 @@ const sharp = require("sharp");
 const fs = require("fs-extra");
 const path = require("path");
 const logger = require("./logger");
+const perf = require("./perfMonitor");
 
 // เปิด pre-process ภาพก่อนส่ง OCR ด้วย OCR_PREPROCESS=1 (ปิดเป็นค่าเริ่มต้น เพื่อ A/B เทียบได้)
 const OCR_PREPROCESS = process.env.OCR_PREPROCESS === "1";
 // OCR_DEBUG=1 เปิด log วินิจฉัย ([OCR][raw] response เต็ม + [OCR][Crop] พิกัด) — ปิดเป็นค่าเริ่มต้น
 // (ลด disk I/O/CPU บน hot path; เปิดเมื่อต้องไล่ปัญหา OCR/crop ไม่ตรงป้าย)
 const OCR_DEBUG = process.env.OCR_DEBUG === "1";
+// Two-pass OCR: รอบแรกอ่านภาพ raw ไม่ออก (no plate) → ลองซ้ำด้วยภาพ enhanced (median/normalise/sharpen)
+// แก้เคส "อ่านไม่ออกเลย" ที่ภาพ contrast ต่ำ/มืด/นัว โดยไม่กระทบเคสที่อ่านออกอยู่แล้ว (รอบแรกเป็น raw เหมือนเดิม)
+// → จ่าย OCR เพิ่มเฉพาะคันที่ยังไงรอบแรกก็พลาด ไม่ใช่ทุกคัน
+// เปิดเป็นค่าเริ่มต้น; ปิดด้วย OCR_RETRY_ENHANCE=0 (ถ้า OCR_PREPROCESS=1 อยู่แล้ว รอบแรกก็ enhanced → ไม่ retry ซ้ำให้เปลือง)
+const OCR_RETRY_ENHANCE = process.env.OCR_RETRY_ENHANCE !== "0";
+// อันดับสถานะผล OCR ต่อภาพ — ใช้เลือก "ภาพที่ดีที่สุด" เมื่อมีหลายใบ (รถคร่อมเลน): read > region > none
+const STATUS_RANK = { read: 3, region: 2, none: 1 };
 
 /**
  * เพิ่มความคมภาพก่อนส่งเข้า OCR — model (YOLO 2 สเตจ) resize crop ป้ายเป็น ~224-256px เสมอ
@@ -141,18 +149,68 @@ function resolveImagePath(preferredPath, fallbackPath) {
 module.exports = {
   normalizePosition,
 
-  async sendToOCR(snapshot, ocrEndpoint, quiet = false) {
+  // สร้าง base64 ของ "ภาพ enhanced" (median/normalise/sharpen) สำหรับส่ง OCR — คืน null ถ้า preprocess ล้ม
+  async buildEnhancedBase64(snapshot, fullPath) {
     try {
-      const fullPath = snapshot.imageUrl;
+      const srcBuffer = snapshot.buffer || (await fs.readFile(fullPath));
+      const enhanced = await preprocessForOcr(srcBuffer);
+      return `data:image/jpeg;base64,${enhanced.toString("base64")}`;
+    } catch (e) {
+      logger.warn(`[OCR] Preprocess failed: ${e.message}`);
+      return null;
+    }
+  },
+
+  // ยิง OCR หนึ่งครั้ง → คืนสถานะ 3 ระดับ (ตรงกับตารางเลือกภาพ):
+  //   read   = มี plate + license_plate (อ่านออก)
+  //   region = มี plate แต่ไม่มี license_plate (เจอกรอบป้ายแต่อ่านตัวอักษรไม่ออก)
+  //   none   = ไม่มี plate (ไม่เจอป้าย)
+  async ocrRequestOnce(base64Data, fullPath, ocrEndpoint) {
+    const response = await axios({
+      method: "POST",
+      maxBodyLength: Infinity,
+      url: ocrEndpoint,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      data: JSON.stringify({
+        plates: [{ plate_path: fullPath, base64: base64Data }],
+      }),
+      timeout: 3000,
+    });
+
+    // [Capture] ดู response ดิบจาก model (มี score/confidence ไหม) — gate ด้วย OCR_DEBUG=1
+    // (สรุปแล้วว่า model ไม่คืน confidence; เปิดไว้เผื่อไล่ปัญหา response แปลกๆ ภายหลัง)
+    if (OCR_DEBUG) logger.info(`[OCR][raw] ${JSON.stringify(response.data)}`);
+
+    const plate = response.data?.plate;
+    if (!plate) return { status: "none" };
+    if (!plate.license_plate) {
+      return { status: "region", position: plate.position, plate_path: plate.plate_path || fullPath };
+    }
+    return {
+      status: "read",
+      license_plate: plate.license_plate,
+      province: plate.province,
+      position: plate.position,
+      plate_path: plate.plate_path || fullPath,
+    };
+  },
+
+  // ประเมินภาพหนึ่งใบด้วย two-pass (raw → enhanced ถ้ายังอ่านไม่ออก) → คืนผลที่ดีที่สุด { status, ... }
+  // counter ([Metrics]): ocr_no_plate (รอบแรกไม่ read) / ocr_recovered_by_enhance / ocr_retry_ms
+  async evaluateSnapshot(snapshot, ocrEndpoint, quiet = false) {
+    const fullPath = snapshot.imageUrl;
+    try {
+      // ---- Pass 1: ภาพ raw (เว้นแต่ตั้ง OCR_PREPROCESS=1 ให้รอบแรกเป็น enhanced เลย) ----
       let base64Data;
+      let firstPassEnhanced = false;
       if (OCR_PREPROCESS) {
-        try {
-          const srcBuffer = snapshot.buffer || (await fs.readFile(fullPath));
-          const enhanced = await preprocessForOcr(srcBuffer);
-          base64Data = `data:image/jpeg;base64,${enhanced.toString("base64")}`;
-        } catch (e) {
-          // pre-process ล้ม = ส่งภาพต้นฉบับแทน (ไม่ทำให้คันนี้หลุด)
-          logger.warn(`[OCR] Preprocess failed, sending original: ${e.message}`);
+        base64Data = await this.buildEnhancedBase64(snapshot, fullPath);
+        if (base64Data) {
+          firstPassEnhanced = true;
+        } else {
+          // preprocess ล้ม = ส่งภาพต้นฉบับแทน (ไม่ทำให้คันนี้หลุด)
           base64Data = snapshot.buffer
             ? `data:image/jpeg;base64,${snapshot.buffer.toString("base64")}`
             : await this.loadImageAsBase64(fullPath);
@@ -163,60 +221,67 @@ module.exports = {
           : await this.loadImageAsBase64(fullPath);
       }
 
-      const response = await axios({
-        method: "POST",
-        maxBodyLength: Infinity,
-        url: ocrEndpoint,
-        headers: {
-          "Content-Type": "application/json",
-        },
-        data: JSON.stringify({
-          plates: [{ plate_path: fullPath, base64: base64Data }],
-        }),
-        timeout: 3000,
-      });
+      let ev = await this.ocrRequestOnce(base64Data, fullPath, ocrEndpoint);
 
-      // [Capture] ดู response ดิบจาก model (มี score/confidence ไหม) — gate ด้วย OCR_DEBUG=1
-      // (สรุปแล้วว่า model ไม่คืน confidence; เปิดไว้เผื่อไล่ปัญหา response แปลกๆ ภายหลัง)
-      if (OCR_DEBUG) logger.info(`[OCR][raw] ${JSON.stringify(response.data)}`);
-
-      const plate = response.data?.plate;
-      if (!plate) {
-        logger.info(`[OCR] No plate detected (${path.basename(fullPath)})`);
-        return null;
+      // ---- Pass 2: รอบแรกยังไม่ read → ลองซ้ำด้วยภาพ enhanced (เฉพาะเมื่อรอบแรกยังเป็น raw) ----
+      if (ev.status !== "read") {
+        perf.count("ocr_no_plate"); // baseline: อ่านไม่ออกรอบแรก ต่อรอบสรุป [Metrics]
+        if (OCR_RETRY_ENHANCE && !firstPassEnhanced) {
+          const retryTimer = perf.timer();
+          const enhanced64 = await this.buildEnhancedBase64(snapshot, fullPath);
+          if (enhanced64) {
+            const ev2 = await this.ocrRequestOnce(enhanced64, fullPath, ocrEndpoint);
+            perf.observe("ocr_retry_ms", retryTimer()); // ต้นทุนเวลาที่เพิ่ม เฉพาะเคสพลาด
+            if ((STATUS_RANK[ev2.status] || 1) > (STATUS_RANK[ev.status] || 1)) {
+              if (ev2.status === "read") {
+                perf.count("ocr_recovered_by_enhance"); // กู้กลับมาอ่านออกได้จากที่พลาด
+                if (!quiet) logger.info(`[OCR] Recovered by enhance: ${ev2.license_plate} (${ev2.province || "N/A"}) (${path.basename(fullPath)})`);
+              }
+              ev = ev2;
+            }
+          }
+        }
       }
-
-      const license_plate = plate.license_plate;
-      if (!license_plate) {
-        if (!quiet) logger.info(`[OCR] Plate region found but unreadable (${path.basename(fullPath)})`);
-        return null;
-      }
-      if (!quiet) logger.info(`[OCR] Plate: ${license_plate} (${plate.province || "N/A"}) (${path.basename(fullPath)})`);
-
-      let crop_path = null;
-      if (plate.position) {
-        crop_path = await this.cropImage(
-          plate.plate_path,
-          plate.position,
-          fullPath
-        );
-      }
-
-      return {
-        license_plate,
-        province: plate.province,
-        position: plate.position,
-        plate_path: plate.plate_path || fullPath,
-        crop_path,
-      };
+      return ev;
     } catch (err) {
       if (err.response) {
         logger.error(`[OCR] Error sending snapshot to OCR: ${err.response.status} ${err.message}`);
       } else {
         logger.error(`[OCR] Error sending snapshot to OCR: ${err.message}`);
       }
-      return null;
+      return { status: "none" };
     }
+  },
+
+  // ขนาดไฟล์ภาพ (ไบต์) — proxy ความคม/ความสมบูรณ์ สำหรับ tie-break ลำดับ 3 (ไม่เจอป้ายทั้งคู่)
+  _snapshotSizeBytes(snapshot) {
+    if (snapshot && snapshot.buffer) return snapshot.buffer.length;
+    try { return fs.statSync(snapshot.imageUrl).size; } catch (e) { return 0; }
+  },
+
+  // a ดีกว่า b ไหม ตามตาราง: read > region > none ; เสมอที่ read → มีจังหวัดชนะ ; เสมอที่ none → ไฟล์ใหญ่กว่าชนะ
+  _isBetterPlate(a, snapA, b, snapB) {
+    const ra = STATUS_RANK[a.status] || 1;
+    const rb = STATUS_RANK[b.status] || 1;
+    if (ra !== rb) return ra > rb;
+    if (a.status === "read") {
+      const pa = a.province ? 1 : 0, pb = b.province ? 1 : 0;
+      if (pa !== pb) return pa > pb;
+      return false; // เสมอ → คงใบแรก (เลนแรก/ใกล้เวลาสุด)
+    }
+    if (a.status === "none") {
+      return this._snapshotSizeBytes(snapA) > this._snapshotSizeBytes(snapB);
+    }
+    return false; // region เสมอ → คงใบแรก
+  },
+
+  // เลือก index ของภาพที่ดีที่สุดจากผล OCR หลายใบ (ตามตารางลำดับ)
+  pickBestPlate(evals, snapshots) {
+    let bestIdx = 0;
+    for (let i = 1; i < evals.length; i++) {
+      if (this._isBetterPlate(evals[i], snapshots[i], evals[bestIdx], snapshots[bestIdx])) bestIdx = i;
+    }
+    return bestIdx;
   },
 
   async loadImageAsBase64(imagePath) {

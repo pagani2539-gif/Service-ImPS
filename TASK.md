@@ -59,6 +59,8 @@
 - **รอบ 3 — Monitoring + Stability:** 🔴 fix ghost controller (clear reconnect timer + `shouldReconnect` guard), dedup data message ซ้ำ (`_isDuplicateMessage`), **perfMonitor.js** (counters/latency p50·p95·max/in-flight/event-loop lag/CPU/RSS), นับ `db_pool_enqueue`
 - **รอบ 4 — Pipeline logging + Straddle bugfix:** pipeline logging ครอบทั้ง DataLogger, 🔴 คำนวณ `setViolation`/`calculateESAL` ใหม่หลัง merge (เดิมรถคร่อมเลนน้ำหนักเกินถูกบันทึกว่า "ผ่าน"), straddle instrument (`[Compare]`/`[Orphan]`), **ลบ InterComp ทั้งหมด** (หน้างานใช้แค่ DataLogger; ย้าย `ignoreGVW`/`isIgnoredLength` เข้า `mapDataLogger`)
 - **รอบ 5 — Documentation:** อัปเดต README/SKILL + docs (straddling/config-guide)
+- **รอบ 6 — Cross-lane straddle (B2) + 2 ประเภท:** (กล้องยืนยัน ~62/67 orphans = คร่อมเลน) จับคู่ครึ่งคันที่ filter ตัดทิ้งผ่าน `recentVehicles` (record reading ที่ถูก drop), แยกหน้าต่าง `STRADDLE_MATCH_MS`(50, suppress) / `STRADDLE_CONFIRM_MS`(250→หน้างาน 400, confirm+mirror), **Type 2 mirror** (เซ็นเซอร์ออกเลนเดียว → เติมฝั่งหายทุกเลน, `violation=0`), **align-null fallback** (รวมเพลาไม่ลง → pick-heavier+mirror), `STRADDLE_PARTNER_FLOOR`(1000, แยกจาก gvw_ignored). **deploy แล้ว: orphan 68→0, ใบสั่งผิด 0, error 0**. ดู `docs/straddling-detection.md` ข้อ B2
+- **รอบ 7 — Cleanup:** ลบ dead code — `picoService.js`+env `PICO_BASE`, EdgeMirror (`_tryEdgeMirror`/`mirror_edge_zones`/env `MIRROR_EDGE_ZONES`/`parseEdgeZones`), `real-straddle` type (redundant). เก็บ `VMS_URL`, `mirrorEdgeAxles` (ใช้จริง), db.js column. อัปเดต docs ทั้งหมด
 
 ---
 
@@ -72,7 +74,7 @@
 ## จูนได้เองที่ config (ไม่ต้องแก้โค้ด)
 
 - `THREE_DIMENSION_DELAY` (env)
-- `delay_capture_overview`, `straddling_*`, `mirror_edge_zones` (ตาราง `configuration`)
+- `delay_capture_overview`, `straddling_*` (ตาราง `configuration`) · `STRADDLE_MATCH_MS`/`STRADDLE_CONFIRM_MS` (env) · ~~`mirror_edge_zones`~~ (เลิกใช้)
 - `LOG_LEVEL=info` ใน production (กัน debug ท่วม) · `OCR_DEBUG=1` เมื่อต้องไล่ปัญหา crop
 - `METRICS_INTERVAL_MS` — รอบสรุป metrics
 

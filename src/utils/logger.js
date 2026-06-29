@@ -24,12 +24,12 @@ const CONSOLE_QUIET_PATTERNS = [
   /^\[Registry\] Pruned/,
   /^\[Straddling\]\[Compare\]/, // ทุกคู่ที่สแกน (noisy)
   /^\[Straddling\] High-precision/, // รายละเอียดตอน merge
-  /^\[EdgeMirror\]\[Skip\]/, // เหตุผลที่ไม่ mirror รถไหลทาง (เก็บครบในไฟล์ log, ซ่อนจาก console)
   /^\[Image Wait\]/, // retry รอรูป
   /^\[Metrics\] Changing/, // เปลี่ยน format/interval (เก็บเฉพาะ summary)
   /^\[PERF\]/, // เวลา insert/query รายคัน
   /^\[Cleanup\]/, // งานลบไฟล์รายวัน
   /^\[Filter\] Excluded/, // คัดออกด้วย prefix/bus (เก็บ "Dropped" ไว้โชว์)
+  /^\[Diag\]/, // diagnostic ละเอียด (DIAG=1) — เก็บครบในไฟล์ info-*.log แต่ซ่อนจาก console กันรก
 ];
 
 const consoleVerbose = process.env.CONSOLE_VERBOSE === "1";
@@ -84,7 +84,8 @@ const logger = winston.createLogger({
       dirname: logDirectory,
       filename: "info-%DATE%.log",
       datePattern: "YYYY-MM-DD",
-      maxSize: "20m",
+      // DIAG=1 เพิ่มปริมาณ log มาก → ขยาย maxSize กันไฟล์แตกหลายส่วนต่อวัน (ปกติ 20m); override ด้วย LOG_MAX_SIZE
+      maxSize: process.env.LOG_MAX_SIZE || (process.env.DIAG === "1" ? "100m" : "20m"),
       maxFiles: "14d",
       level: "info",
       format: fileFormat,

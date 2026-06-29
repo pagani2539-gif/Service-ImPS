@@ -1,6 +1,11 @@
 const axios = require("axios");
 const logger = require("../utils/logger");
 async function sendToTransmission(url, data) {
+  // กัน url ว่าง (TRANSMISSION_URL ไม่ได้ตั้ง → ค่า '' ) — เดิมยิง POST ไป '' ทุกคัน = error noise
+  // (เทียบเท่า guard ใน sendToVMS)
+  if (!url || url.trim() === "" || url === "null" || url === "undefined") {
+    return;
+  }
   try {
     const response = await axios.post(url, data, {
       timeout: 3000, // Set timeout to 3000ms

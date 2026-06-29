@@ -45,18 +45,8 @@ async function ensureConfigurationSchema(promisePool) {
             logger.info(`[DB Schema] Checked/Added column ${col.name} to configuration`);
         } catch (err) {
             if (err.errno !== 1060 && err.code !== 'ER_DUP_FIELDNAME') {
-                logger.error(`[DB Schema] Error checking column ${col.name}:`, err.message);
+                logger.error(`[DB Schema] Error checking column ${col.name}: ${err.message}`);
             }
-        }
-    }
-
-    // ตาราง vehicles: ธงบอกว่าน้ำหนักเป็น "ค่าประมาณ" (mirror จากรถไหลทาง) — ห้ามใช้เป็นหลักฐานน้ำหนักเกิน
-    try {
-        await promisePool.query("ALTER TABLE vehicles ADD COLUMN is_estimated TINYINT DEFAULT 0");
-        logger.info("[DB Schema] Checked/Added column is_estimated to vehicles");
-    } catch (err) {
-        if (err.errno !== 1060 && err.code !== 'ER_DUP_FIELDNAME') {
-            logger.error("[DB Schema] Error checking is_estimated:", err.message);
         }
     }
 }
@@ -82,13 +72,11 @@ function createPool() {
     });
 
     pool.on('error', (err) => {
-        logger.error('Database error:', err.code);
-        if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ECONNRESET') {
-            logger.info('Attempting to reconnect to the database...');
-            createPool(); // Recreate the pool
-        } else {
-            throw err;
-        }
+        // pool ของ mysql2 จัดการ connection หายรายตัวเอง (ทิ้งตัวที่เสีย + สร้างใหม่ตอน getConnection)
+        // เดิม createPool() สร้าง pool ใหม่ใส่ตัวแปร local แต่ module.exports คืน promisePool "ตัวแรก" ไปแล้ว
+        // → consumer ทุกตัวยังถือ pool เก่าที่ตาย (orphan) ; และ throw = uncaught → process crash
+        // จึงแค่ log อย่างเดียว ไม่ recreate/ไม่ throw → pool เดิมฟื้นเองเมื่อ DB กลับมา
+        logger.error('Database pool error:', err && err.code);
     });
 
     const promisePool = pool.promise();

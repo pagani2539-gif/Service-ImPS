@@ -62,7 +62,6 @@ async function getConfiguration() {
           c.trigger_history_window_ms,
           c.metrics_interval_ms,
           c.metrics_format,
-          c.mirror_edge_zones,
           -- Subquery for streaming_urls
           (SELECT JSON_ARRAYAGG(JSON_OBJECT('url', su.url))
           FROM streaming_urls su

@@ -94,7 +94,9 @@ sequenceDiagram
      * ตรวจเช็คความเร็วใกล้เคียงกัน (ต่างกันไม่เกิน 15 กม./ชม.)
    - ยุบรวมเพลาซ้าย-ขวาเป็นแถวเดียว **แล้วคำนวณ class/violation/ESAL ใหม่บนน้ำหนักรวม** (ครึ่งคันมี class/น้ำหนักเกินผิด) พร้อม Log น้ำหนักล้อก่อน-หลังรวมเพื่อตรวจสอบได้
    - **Same-lane fragment combine:** ถ้า controller เลนเดียวตัดรถยาวเป็น 2 ท่อน จะรวมท่อนหน้า-หลังก่อน แล้วรอจับคู่ข้ามเลนต่อ
-   - **Edge-Drift Mirror (รถไหลทาง):** รถชิดขอบถนน/เกาะกลางที่ล้อข้างหนึ่งพ้นเซ็นเซอร์ (ไม่มีคู่ให้ merge) จะ mirror น้ำหนักฝั่งที่วัดได้เป็น **"ค่าประมาณ"** (`is_estimated`, ห้ามใช้ตรวจน้ำหนักเกิน) — เปิดผ่าน `mirror_edge_zones` ใน DB (default ปิด)
+   - **align-null fallback:** Compare ผ่านแต่รวมเพลาไม่ลงตัว (เช่น 6vs5) → เลือกใบหนัก + mirror แทนปล่อย 2 ครึ่ง
+   - **ชั้นกู้ที่ 2 (B2 cross-lane):** ครึ่งที่หมดเวลา buffer เช็คคู่ใน `recentVehicles` (เก็บรอย reading ที่ถูก filter ตัดด้วย) → `suppress-dup` (50ms) / `confirm-straddle` + mirror (250ms) ตามชนิดคู่ที่มี "สัญญาณคร่อมเลน"
+   - **Type 2 mirror (คร่อมนุ่ม/ไหลทาง):** reading ฝั่งเดียวศูนย์ที่ไม่มีคู่ (เซ็นเซอร์เลนข้างไม่ออก record) → mirror เติมฝั่งหายเป็น **"ค่าประมาณ"** (`STRADDLE?`, `violation=0`) — ทุกเลน ไม่ต้องตั้ง edge-zone *(`mirror_edge_zones` เลิกใช้)*
    - รายละเอียดเต็ม: [docs/straddling-detection.md](docs/straddling-detection.md) · ตั้งค่า: [docs/config-guide.md](docs/config-guide.md)
 
 
@@ -197,7 +199,7 @@ cp .env.example .env
 | `OCR_PREPROCESS` | เปิด pre-process ภาพก่อนส่ง OCR (sharpen/denoise/normalise) `1`=เปิด, ไม่ใส่=ปิด | `0` |
 | `OCR_DEBUG` | เปิด log วินิจฉัย OCR (`[OCR][raw]` response เต็ม + `[OCR][Crop]` พิกัด) `1`=เปิด, ไม่ใส่=ปิด | `0` |
 
-> **หมายเหตุ:** การจูน straddling / edge-mirror (`straddling_*`, `mirror_edge_zones`) อยู่ใน **ตาราง `configuration` ของ DB** ไม่ใช่ env — อ่านใหม่อัตโนมัติทุก 5 วินาที ดู [docs/config-guide.md](docs/config-guide.md)
+> **หมายเหตุ:** การจูน straddling อยู่ใน **ตาราง `configuration` ของ DB** (`straddling_*`, อ่านใหม่ทุก 5 วิ) + **env** (`STRADDLE_MATCH_MS`/`STRADDLE_CONFIRM_MS`/`STRADDLE_PARTNER_FLOOR`, ตอน restart) · ดู [docs/config-guide.md](docs/config-guide.md)
 
 ---
 

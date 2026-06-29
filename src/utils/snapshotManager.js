@@ -12,6 +12,26 @@ const { snapshotRegistry, normalizeLane } = require("./snapshotRegistry");
 const DEFAULT_SNAP_MATCH_DB_POLL_MS = 1000;
 const DEFAULT_SNAP_MATCH_MAX_WAIT_MS = 3000;
 
+// burst: ถ่ายกล้อง LPR หลายเฟรม/คัน (เฟรมแรกอ่านไม่ออก → ใช้เฟรมที่สอง) — overview ถ่ายใบเดียวเสมอ
+const LPR_BURST_FRAMES = Math.max(1, Number(process.env.LPR_BURST_FRAMES) || 2);
+// ระยะห่างระหว่างเฟรม (ms); 0 = ยิงติดกัน (ห่างแค่ ~1 round-trip → ป้ายขยับน้อยสุด กันหลุดเฟรม)
+const LPR_BURST_GAP_MS = Math.max(0, Number(process.env.LPR_BURST_GAP_MS) || 0);
+
+// แตก snapshot ที่ claim มา (อาจมีหลายเฟรม/burst) เป็น candidate หลายใบให้ ocrService เลือกใบที่อ่านออก
+function expandFrames(snap) {
+  if (!snap) return [];
+  if (Array.isArray(snap.frames) && snap.frames.length) {
+    return snap.frames.map((f) => ({
+      stamp: snap.stamp,
+      lane: snap.lane,
+      type: snap.type,
+      imageUrl: f.imageUrl,
+      buffer: f.buffer,
+    }));
+  }
+  return [snap]; // ไม่มี frames (DB recovery / entry เก่า) = ใบเดียว
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -38,55 +58,70 @@ class SnapshotManager {
     const { type, stamp } = metadata;
 
     try {
-      const response = await axios.get(url, {
-        responseType: "arraybuffer",
-        timeout: 3000,
-      });
-      if (response.status !== 200) {
-        throw new Error(`Failed to fetch snapshot: ${response.status}`);
-      }
-
       const date = dayjs(stamp);
       const year = date.format("YYYY");
       const month = date.format("MM");
       const day = date.format("DD");
       const timestamp = date.format("YYYY_MM_DD_HH_mm_ss_SSS");
-      const filename = `${type}_${lane}_${timestamp}.jpg`;
-      const filePath = path.join(
-        this.baseImagePath,
-        type,
-        year,
-        month,
-        day,
-        `lane${lane}`,
-        filename
-      );
-
-      await ensureDirCached(path.dirname(filePath));
-      await fs.writeFile(filePath, response.data);
-
+      const dir = path.join(this.baseImagePath, type, year, month, day, `lane${lane}`);
+      await ensureDirCached(dir);
       const stampDate = date.toDate();
 
-      // Register in memory FIRST to ensure it's claimable immediately
+      // LPR ถ่าย burst (default 2 เฟรม); overview ถ่ายใบเดียว
+      const wantFrames = type === "lpr" ? LPR_BURST_FRAMES : 1;
+
+      const frames = [];
+      for (let i = 0; i < wantFrames; i++) {
+        if (i > 0 && LPR_BURST_GAP_MS > 0) await sleep(LPR_BURST_GAP_MS);
+        try {
+          const response = await axios.get(url, { responseType: "arraybuffer", timeout: 3000 });
+          if (response.status !== 200) throw new Error(`status ${response.status}`);
+          // เฟรมแรกใช้ชื่อเดิม (DB recovery จำได้); เฟรมถัดไปต่อท้าย _f2,_f3 กันชื่อชน
+          const filename = i === 0
+            ? `${type}_${lane}_${timestamp}.jpg`
+            : `${type}_${lane}_${timestamp}_f${i + 1}.jpg`;
+          const filePath = path.join(dir, filename);
+          await fs.writeFile(filePath, response.data);
+          frames.push({ imageUrl: filePath, buffer: response.data, stamp: stampDate });
+        } catch (e) {
+          if (i === 0) throw e; // เฟรมแรกถ่ายไม่ได้ = ถือว่าถ่ายไม่สำเร็จ
+          // เฟรมถัดไปพลาด = ข้าม (ยังมีเฟรมแรกใช้ได้ ไม่ทำให้คันนี้หลุด)
+          logger.warn(`[Snapshot] burst frame ${i + 1} failed (lane ${lane}): ${e.message}`);
+          break;
+        }
+      }
+
+      // diagnostic: 2 เฟรมซ้ำกันไหม (กล้องคืนเฟรมเดิม) — เทียบยาวก่อน เท่ากันค่อย equals
+      if (frames.length >= 2) {
+        perf.count("lpr_burst_captured");
+        const a = frames[0].buffer, b = frames[1].buffer;
+        if (Buffer.isBuffer(a) && Buffer.isBuffer(b) && a.length === b.length && a.equals(b)) {
+          perf.count("burst_frames_identical");
+        }
+      }
+
+      const first = frames[0];
+      // Register in memory FIRST to ensure it's claimable immediately (มัดทุกเฟรมเป็นชุดเดียว/คัน)
       snapshotRegistry.register({
         lane,
         type,
         stamp: stampDate,
-        imageUrl: filePath,
-        buffer: response.data,
+        imageUrl: first.imageUrl,
+        buffer: first.buffer,
+        frames,
       });
 
-      // บันทึกลง DB แบบไม่บล็อก — memory คือแหล่งหลัก แถว DB ใช้เฉพาะกู้รูปหลัง restart
+      // บันทึกลง DB แบบไม่บล็อก (เฟรมแรกพอ) — memory คือแหล่งหลัก แถว DB ใช้เฉพาะกู้รูปหลัง restart
       this.pool
         .execute(
           `INSERT INTO snapshots (lane, type, stamp, image_url) VALUES (?, ?, ?, ?)`,
-          [lane, type, stampDate, filePath]
+          [lane, type, stampDate, first.imageUrl]
         )
         .catch((dbErr) => {
-          logger.error(`[Snapshot] DB Insert failed for ${filename}: ${dbErr.message}`);
+          logger.error(`[Snapshot] DB Insert failed for ${path.basename(first.imageUrl)}: ${dbErr.message}`);
         });
 
-      return { lane, type, stamp: stampDate, imageUrl: filePath, buffer: response.data };
+      return { lane, type, stamp: stampDate, imageUrl: first.imageUrl, buffer: first.buffer, frames };
     } catch (err) {
       logger.error(`Error taking snapshot for lane ${lane}, type ${type}: ${err.message}`);
       return null;
@@ -162,6 +197,39 @@ class SnapshotManager {
     const searchedLanes = lanes.join(",");
     logger.warn(`[Snapshot] Not found after ${attempts} attempts (${maxWaitMs}ms). Type: ${type}, Target: ${targetTime}, Lane: ${searchedLanes}`);
     return null;
+  }
+
+  /**
+   * คืน "ภาพผู้สมัคร" สำหรับ OCR เลือกใบที่ดีที่สุด
+   * - รถคร่อมเลน (isStraddlingMerged) → claim ภาพที่ใกล้สุด "ของแต่ละเลน" ใน originalLanes (คนละใบ)
+   *   → ได้ ≥2 ใบให้ ocrService เลือกใบที่อ่านออก/คมสุด (ใช้ภาพที่มีอยู่แล้ว ไม่ถ่ายเพิ่ม)
+   * - รถปกติ → array ใบเดียว (พฤติกรรมเท่าเดิม)
+   * เรียงตามลำดับ originalLanes → index 0 = เลนแรก (ใช้เป็น tie-break ค่าเริ่มต้น)
+   */
+  async findSnapshotCandidates(mappedData, type, quiet = false) {
+    const isStraddle =
+      mappedData.isStraddlingMerged &&
+      Array.isArray(mappedData.originalLanes) &&
+      mappedData.originalLanes.length > 1;
+
+    if (!isStraddle) {
+      const one = await this.findSnapshots(mappedData, type, quiet);
+      return expandFrames(one); // burst: 1 entry อาจมีหลายเฟรม → แตกเป็นหลาย candidate
+    }
+
+    // หาภาพของแต่ละเลนแบบ independent (ค้นทีละเลน ไม่ให้ findSnapshots วนรวมเลนแล้วคืนใบเดียว)
+    const lanes = [...new Set(mappedData.originalLanes.map(normalizeLane))];
+    const results = await Promise.all(
+      lanes.map((lane) =>
+        this.findSnapshots(
+          { ...mappedData, isStraddlingMerged: false, originalLanes: undefined, lane },
+          type,
+          quiet
+        )
+      )
+    );
+    // (เลน × เฟรม) — รถคร่อมเลน + burst รวมทุกใบให้เลือก
+    return results.flatMap(expandFrames);
   }
 
   async _findSnapshotOnce(mappedData, type, { checkDb = true } = {}) {

@@ -28,12 +28,18 @@ class SnapshotRegistry {
     return `${this._key(lane, type)}:${dayjs(stamp).valueOf()}:${imageUrl}`;
   }
 
-  register({ lane, type, stamp, imageUrl, buffer }) {
+  register({ lane, type, stamp, imageUrl, buffer, frames }) {
     const key = this._key(lane, type);
+    const stampMs = dayjs(stamp).valueOf();
     const entry = {
-      stamp: dayjs(stamp).valueOf(),
+      stamp: stampMs,
       imageUrl,
-      buffer, // Store binary buffer in memory
+      buffer, // Store binary buffer in memory (เฟรมแรก — backward compat + DB recovery)
+      // burst: เก็บทุกเฟรมของรถคันเดียวเป็น "ชุดเดียว" (1 entry/คัน → registry ไม่บวม กันจับคู่ข้ามคัน)
+      // ถ้าไม่ส่ง frames มา = entry เก่า → สร้างชุดจากเฟรมเดียว
+      frames: (Array.isArray(frames) && frames.length)
+        ? frames
+        : [{ imageUrl, buffer, stamp: stampMs }],
     };
     const list = this.pending.get(key) || [];
     const last = list.length ? list[list.length - 1] : null;
@@ -58,9 +64,11 @@ class SnapshotRegistry {
       for (const [k, vList] of this.pending.entries()) {
         let changed = false;
         const filteredList = vList.map(e => {
-          if (now - e.stamp > ttlMs && e.buffer) {
-            e.buffer = null; // Clear binary data from RAM
-            changed = true;
+          if (now - e.stamp > ttlMs) {
+            if (e.buffer) { e.buffer = null; changed = true; } // Clear binary data from RAM
+            if (e.frames) {
+              for (const f of e.frames) { if (f.buffer) { f.buffer = null; changed = true; } }
+            }
           }
           return e;
         });
@@ -180,7 +188,8 @@ class SnapshotRegistry {
       lane,
       type,
       imageUrl: best.imageUrl,
-      buffer: best.buffer, // Return binary buffer
+      buffer: best.buffer, // Return binary buffer (เฟรมแรก)
+      frames: best.frames, // burst: ส่งทุกเฟรมของคันนี้ไปให้เลือกใบที่อ่านออก
     };
   }
 

@@ -13,8 +13,8 @@ const IS_DEV = process.env.NODE_ENV === 'development';
 // Insert a vehicle into the Vehicles table
 async function insertVehicle(connection, data) {
   const [result] = await connection.query(
-    `INSERT INTO vehicles (axles_count, gvw, vehicle_id, lane, left_weight, right_weight, length, speed, stamp, is_overweight, error_flags, warning_flags,is_error_flagged,is_warning_flagged,vehicle_class_id,esal,overweight_percentage,is_estimated)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO vehicles (axles_count, gvw, vehicle_id, lane, left_weight, right_weight, length, speed, stamp, is_overweight, error_flags, warning_flags,is_error_flagged,is_warning_flagged,vehicle_class_id,esal,overweight_percentage)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.axlesCount,
       data.gvw,
@@ -33,7 +33,6 @@ async function insertVehicle(connection, data) {
       data.vehicleClassID,
       data.esal,
       data.overweight_percentage,
-      data.isEstimated ? 1 : 0,
     ]
   );
   return result.insertId;
