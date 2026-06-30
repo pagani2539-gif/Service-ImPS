@@ -4,7 +4,6 @@ const path = require("path");
 const schedule = require("node-schedule");
 const pool = require("../config/db");
 const dayjs = require("dayjs");
-const { getConfiguration } = require("./configurationService");
 const logger = require("../utils/logger");
 const snapshotsDir = path.join(__dirname, "../../public/snapshots");
 
@@ -26,15 +25,8 @@ const removeDirectoryAsync = async (dirPath) => {
  * Clean up snapshots older than retention period (Non-blocking)
  */
 const removeOldFolders = async () => {
-  let retentionDays = 3;
-  try {
-    const config = await getConfiguration();
-    if (config && config.retention_days != null) {
-      retentionDays = Number(config.retention_days);
-    }
-  } catch (err) {
-    logger.error("[Cleanup] Failed to fetch retention_days from database, using default (3):", err.message);
-  }
+  // FIXED retention — เก็บภาพสูงสุด 7 วัน ปรับไม่ได้ผ่าน DB/env (ตัด dependency retention_days)
+  const retentionDays = 7;
 
   // Calculate threshold: anything BEFORE 00:00:00.000 of (today - (retentionDays-1))
   // e.g. Today is 22nd. Retention 3 days means keep 22, 21, 20. Delete 19 and older.

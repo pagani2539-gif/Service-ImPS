@@ -86,7 +86,7 @@ const logger = winston.createLogger({
       datePattern: "YYYY-MM-DD",
       // DIAG=1 เพิ่มปริมาณ log มาก → ขยาย maxSize กันไฟล์แตกหลายส่วนต่อวัน (ปกติ 20m); override ด้วย LOG_MAX_SIZE
       maxSize: process.env.LOG_MAX_SIZE || (process.env.DIAG === "1" ? "100m" : "20m"),
-      maxFiles: "14d",
+      maxFiles: "7d",
       level: "info",
       format: fileFormat,
     }),
@@ -96,7 +96,7 @@ const logger = winston.createLogger({
       filename: "error-%DATE%.log",
       datePattern: "YYYY-MM-DD",
       maxSize: "20m",
-      maxFiles: "30d",
+      maxFiles: "7d",
       level: "error",
       format: fileFormat,
     }),

@@ -1,7 +1,7 @@
 # TASK — IMPS Service Performance Optimization
 
 > สรุปงาน optimize ทั้งหมด — ห้ามแก้ schema เชิงโครงสร้าง, ไม่แตะ WIM calculation, ไม่เปลี่ยน sensor/protocol/API output
-> อัปเดตล่าสุด: 2026-06-20
+> อัปเดตล่าสุด: 2026-06-30
 
 ## สถานะรวม
 
@@ -14,6 +14,19 @@
 | 5 | Documentation update | ✅ เสร็จ (2026-06-16) |
 | — | Straddle finish (error-drop / zero-side / re-classify / trigger debounce / edge-mirror) | ✅ เสร็จ (`fdce4f5`) |
 | 6 | Bottleneck fixes (P1–P4) + doc sync | ✅ เสร็จ (2026-06-20) |
+| 7 | Cleanup dead code (Pico / EdgeMirror) | ✅ เสร็จ |
+| 8 | Retention 7 วัน (ภาพ+log) + LPR burst + doc sync | ✅ เสร็จ (2026-06-30) |
+
+---
+
+## รอบ 8 — Retention 7 วัน + doc sync ✅ (2026-06-30)
+
+- [x] **Retention ภาพ → hardcode 7 วัน:** `snapshotCleanupService.js` เลิกอ่าน `configuration.retention_days` จาก DB → ใช้ค่าคงที่ `retentionDays = 7` (ปรับไม่ได้ตามที่หน้างานสั่ง) — ผลพลอยได้: ตัด dependency `c.retention_days` → error `Unknown column` / `Cleanup Failed to fetch` หายไป
+- [x] **Retention log → 7 วัน:** `logger.js` `maxFiles` info `14d`→`7d`, error `30d`→`7d` (winston ลบไฟล์เก่าสุดอัตโนมัติ) — เก็บทุกบรรทัดไว้ตรวจสอบ แค่จำกัดอายุ 7 วัน
+- [x] **Doc sync:** README/SKILL — แก้ Smart Retry (5×2/4/6/8/10s → 3×500ms ตาม code จริง), retention (DB→fixed 7), ลบ Pico (ถูกลบไปแล้ว), เพิ่มฟีเจอร์ที่ยังไม่มีในเอกสาร (LPR burst, two-pass OCR, trigger watchdog, F5 readiness, DIAG)
+
+**ไฟล์:** `snapshotCleanupService.js`, `logger.js`, `README.md`, `SKILL.md`, `TASK.md`
+**หมายเหตุ:** ต้องเช็คพื้นที่ดิสก์ — 7 วัน ใช้ ~2.3 เท่าของ 3 วันเดิม
 
 ---
 
