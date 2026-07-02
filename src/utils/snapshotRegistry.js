@@ -192,23 +192,6 @@ class SnapshotRegistry {
       frames: best.frames, // burst: ส่งทุกเฟรมของคันนี้ไปให้เลือกใบที่อ่านออก
     };
   }
-
-  /**
-   * Check if there is an unused image in the memory cache for a given lane, type, and target stamp.
-   */
-  hasUnusedImageInWindow(lane, type, targetStamp, minimumSearchMs, maximumSearchMs) {
-    const key = this._key(lane, type);
-    const list = this.pending.get(key) || [];
-    const target = dayjs(targetStamp).valueOf();
-    const min = target - minimumSearchMs;
-    const max = target + maximumSearchMs;
-
-    return list.some(entry =>
-      entry.stamp >= min &&
-      entry.stamp <= max &&
-      !this.isUsed(lane, type, entry.stamp, entry.imageUrl)
-    );
-  }
 }
 
 function normalizeLane(lane) {

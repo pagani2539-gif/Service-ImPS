@@ -32,7 +32,6 @@ const logger = require("../utils/logger");
 const perf = require("../utils/perfMonitor");
 const { insertVehicleWithDetails, updatePlates, updateOverview } = require("../services/vehiclesService");
 const baseImagePath = path.join(process.cwd(), "public/snapshots");
-const baseLedPath = path.join(process.cwd(), "public/leds");
 const transmissionUrl = process.env.TRANSMISSION_URL || '';
 // ซ้าย(ch1)+ขวา(ch2) ของรถคันเดียวยิง trigger แทบพร้อมกัน — ถ่าย snapshot ใบเดียวภายในช่วงนี้พอ
 const TRIGGER_DEBOUNCE_MS = Number(process.env.TRIGGER_DEBOUNCE_MS) || 250;

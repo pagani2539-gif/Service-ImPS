@@ -310,19 +310,6 @@ class SnapshotManager {
     }
   }
 
-  async moveFile(src, dest) {
-    try {
-      if (!(await fs.pathExists(src))) {
-        throw new Error(`Source file does not exist: ${src}`);
-      }
-      await fs.ensureDir(path.dirname(dest));
-      await fs.move(src, dest, { overwrite: true });
-      return { success: true, message: `File moved successfully`, dest };
-    } catch (err) {
-      return { success: false, message: `Error moving file: ${err.message}` };
-    }
-  }
-
   async uploadImage(filePath, type = null, buffer = null, quiet = false) {
     try {
       const fileName = path.basename(filePath);
