@@ -41,7 +41,7 @@ const removeOldFolders = async () => {
   }
 
   try {
-    const types = ["lpr", "overview"];
+    const types = ["lpr", "crop", "overview"];
     for (const type of types) {
       const typeDir = path.join(snapshotsDir, type);
       if (!fsSync.existsSync(typeDir)) continue;

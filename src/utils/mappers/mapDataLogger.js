@@ -1,6 +1,6 @@
 // src\utils\mappers\mapDataLogger.js
 const logger = require("../logger");
-// Utildatay to map error flags
+// Utility to map warning/error flags
 function mapWarningFlag(data) {
   const warningFlag = data.warningFlags;
   const warningFlag_binary = warningFlag.toString(2).split("").reverse();

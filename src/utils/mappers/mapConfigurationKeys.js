@@ -42,7 +42,6 @@ function mapConfigurationKeys(config) {
       led_url: config.led_url || '',
       led_enabled: config.led_enabled || 0,
       wheelbase_bus: config.wheelbase_bus || 0,
-      vehicle_length_ignored:config.vehicle_length_ignored||0,
       retention_days: config.retention_days ?? 3,
       // เกณฑ์จับคู่รถคร่อมเลน — ปรับผ่าน .env (STRADDLING_*) เท่านั้น
       // หมายเหตุ: คอลัมน์ axle_tol/speed_diff/wheelbase_diff/zero_kg "ไม่ได้ SELECT" ใน configurationService

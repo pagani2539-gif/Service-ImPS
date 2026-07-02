@@ -54,7 +54,6 @@ async function getConfiguration() {
           c.led_url,
           c.led_enabled,
           c.wheelbase_bus,
-          c.vehicle_length_ignored,
           c.retention_days,
           c.straddling_time_diff,
           c.snap_match_db_poll_ms,

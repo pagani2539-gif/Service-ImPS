@@ -324,8 +324,15 @@ module.exports = {
         logger.info(`[OCR][Crop] src=${path.basename(sourcePath)} img=${meta.width}x${meta.height} pos=${JSON.stringify(position)} rect=${JSON.stringify(rect)} clamped=${JSON.stringify(clamped)}${clampedHard ? " ⚠️CLAMPED" : ""}`);
       }
 
-      const croppedImagePath = sourcePath.replace(/\.jpg$/i, "_cropped.jpg");
+      // เซฟรูป crop แยกโฟลเดอร์ของตัวเอง (public/snapshots/crop/...) ไม่ปนกับรูปเต็มใน lpr
+      // mirror โครงสร้าง year/month/day/laneN เดิม โดยสลับ segment "snapshots/lpr" → "snapshots/crop"
+      // (ถ้า sourcePath ไม่ได้อยู่ใต้ snapshots/lpr = ไม่เข้าเงื่อนไข → คงพฤติกรรมเดิม เซฟข้างไฟล์ต้นฉบับ)
+      const croppedImagePath = sourcePath
+        .replace(/(snapshots[\\/])lpr([\\/])/i, "$1crop$2")
+        .replace(/\.jpg$/i, "_cropped.jpg");
 
+      // โฟลเดอร์ crop เพิ่งสลับมาใหม่ อาจยังไม่มี → สร้างก่อน sharp เขียนไฟล์ (กัน ENOENT)
+      await fs.ensureDir(path.dirname(croppedImagePath));
       await sharp(sourcePath).extract(clamped).toFile(croppedImagePath);
 
       return croppedImagePath;
